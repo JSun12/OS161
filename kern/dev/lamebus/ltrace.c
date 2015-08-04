@@ -38,7 +38,6 @@
 #define LTRACE_REG_TROFF   4
 #define LTRACE_REG_DEBUG   8
 #define LTRACE_REG_DUMP    12
-#define LTRACE_REG_STOP    16
 
 static struct ltrace_softc *the_trace;
 
@@ -75,15 +74,6 @@ ltrace_dump(uint32_t code)
 	if (the_trace != NULL) {
 		bus_write_register(the_trace->lt_busdata, the_trace->lt_buspos,
 				   LTRACE_REG_DUMP, code);
-	}
-}
-
-void
-ltrace_stop(uint32_t code)
-{
-	if (the_trace != NULL && the_trace->lt_canstop) {
-		bus_write_register(the_trace->lt_busdata, the_trace->lt_buspos,
-				   LTRACE_REG_STOP, code);
 	}
 }
 

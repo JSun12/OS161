@@ -9,7 +9,7 @@ SUBDIRS=bin sbin testbin libc syscall dev misc
 
 # Top level man pages
 MANDIR=/man
-MANFILES=index.html man.css manindex.css
+MANFILES=index.html
 
 .include "$(TOP)/mk/os161.subdir.mk"
 .include "$(TOP)/mk/os161.man.mk"

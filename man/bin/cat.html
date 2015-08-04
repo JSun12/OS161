@@ -29,8 +29,6 @@ SUCH DAMAGE.
 <html>
 <head>
 <title>cat</title>
-<link rel="stylesheet" type="text/css" media="all" href="../man.css">
-</head>
 <body bgcolor=#ffffff>
 <h2 align=center>cat</h2>
 <h4 align=center>OS/161 Reference Manual</h4>
@@ -61,7 +59,7 @@ With no arguments, <tt>cat</tt> prints its standard input.
 </p>
 
 <h3>Requirements</h3>
-<p>
+
 <tt>cat</tt> uses the following syscalls:
 <ul>
 <li><A HREF=../syscall/open.html>open</A>
@@ -70,7 +68,6 @@ With no arguments, <tt>cat</tt> prints its standard input.
 <li><A HREF=../syscall/close.html>close</A>
 <li><A HREF=../syscall/_exit.html>_exit</A>
 </ul>
-</p>
 
 <p>
 <tt>cat</tt> should function properly once the basic system calls

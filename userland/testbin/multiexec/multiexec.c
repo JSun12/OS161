@@ -67,7 +67,7 @@ semcreate(const char *tag, struct usem *sem)
 {
 	int fd;
 
-	snprintf(sem->name, sizeof(sem->name), "sem:multiexec.%s.%d",
+	snprintf(sem->name, sizeof(sem->name), "sem:parallelvm.%s.%d",
 		 tag, (int)getpid());
 
 	fd = open(sem->name, O_WRONLY|O_CREAT|O_TRUNC, 0664);

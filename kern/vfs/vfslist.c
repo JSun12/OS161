@@ -175,7 +175,7 @@ vfs_sync(void)
  * back an appropriate vnode.
  */
 int
-vfs_getroot(const char *devname, struct vnode **ret)
+vfs_getroot(const char *devname, struct vnode **result)
 {
 	struct knowndev *kd;
 	unsigned i, num;
@@ -201,7 +201,8 @@ vfs_getroot(const char *devname, struct vnode **ret)
 
 			if (!strcmp(kd->kd_name, devname) ||
 			    (volname!=NULL && !strcmp(volname, devname))) {
-				return FSOP_GETROOT(kd->kd_fs, ret);
+				*result = FSOP_GETROOT(kd->kd_fs);
+				return 0;
 			}
 		}
 		else {
@@ -221,7 +222,7 @@ vfs_getroot(const char *devname, struct vnode **ret)
 			KASSERT(kd->kd_rawname==NULL);
 			KASSERT(kd->kd_device != NULL);
 			VOP_INCREF(kd->kd_vnode);
-			*ret = kd->kd_vnode;
+			*result = kd->kd_vnode;
 			return 0;
 		}
 
@@ -232,7 +233,7 @@ vfs_getroot(const char *devname, struct vnode **ret)
 		if (kd->kd_rawname!=NULL && !strcmp(kd->kd_rawname, devname)) {
 			KASSERT(kd->kd_device != NULL);
 			VOP_INCREF(kd->kd_vnode);
-			*ret = kd->kd_vnode;
+			*result = kd->kd_vnode;
 			return 0;
 		}
 

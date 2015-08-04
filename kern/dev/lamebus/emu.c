@@ -1241,8 +1241,8 @@ emufs_getvolname(struct fs *fs)
  * FSOP_GETROOT
  */
 static
-int
-emufs_getroot(struct fs *fs, struct vnode **ret)
+struct vnode *
+emufs_getroot(struct fs *fs)
 {
 	struct emufs_fs *ef;
 
@@ -1254,8 +1254,7 @@ emufs_getroot(struct fs *fs, struct vnode **ret)
 	KASSERT(ef->ef_root != NULL);
 
 	VOP_INCREF(&ef->ef_root->ev_v);
-	*ret = &ef->ef_root->ev_v;
-	return 0;
+	return &ef->ef_root->ev_v;
 }
 
 /*

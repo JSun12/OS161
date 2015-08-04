@@ -101,7 +101,6 @@ $(KERNEL):
 	$(KTOP)/conf/newvers.sh $(CONFNAME)
 	$(CC) $(KCFLAGS) -c vers.c
 	$(LD) $(KLDFLAGS) $(OBJS) vers.o -o $(KERNEL)
-	@echo '*** This is $(CONFNAME) build #'`cat version`' ***'
 	$(SIZE) $(KERNEL)
 
 #

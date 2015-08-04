@@ -434,6 +434,6 @@ file		test/threadlisttest.c
 file		test/threadtest.c
 file		test/tt3.c
 file		test/synchtest.c
-file		test/kmalloctest.c
+file		test/malloctest.c
 file		test/fstest.c
 optfile net	test/nettest.c

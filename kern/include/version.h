@@ -34,7 +34,7 @@
  * Leave this alone, so we can tell what version of the OS/161 base
  * code we gave you.
  */
-#define BASE_VERSION    "2.0"
+#define BASE_VERSION    "1.99.08"
 
 /*
  * Change this as you see fit in the course of hacking the system.

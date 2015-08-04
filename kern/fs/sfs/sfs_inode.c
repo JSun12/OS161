@@ -289,8 +289,8 @@ sfs_makeobj(struct sfs_fs *sfs, int type, struct sfs_vnode **ret)
  * Get vnode for the root of the filesystem.
  * The root vnode is always found in block 1 (SFS_ROOTDIR_INO).
  */
-int
-sfs_getroot(struct fs *fs, struct vnode **ret)
+struct vnode *
+sfs_getroot(struct fs *fs)
 {
 	struct sfs_fs *sfs = fs->fs_data;
 	struct sfs_vnode *sv;
@@ -300,20 +300,15 @@ sfs_getroot(struct fs *fs, struct vnode **ret)
 
 	result = sfs_loadvnode(sfs, SFS_ROOTDIR_INO, SFS_TYPE_INVAL, &sv);
 	if (result) {
-		kprintf("sfs: getroot: Cannot load root vnode\n");
-		vfs_biglock_release();
-		return result;
+		panic("sfs: getroot: Cannot load root vnode\n");
 	}
 
 	if (sv->sv_i.sfi_type != SFS_TYPE_DIR) {
-		kprintf("sfs: getroot: not directory (type %u)\n",
+		panic("sfs: getroot: not directory (type %u)\n",
 		      sv->sv_i.sfi_type);
-		vfs_biglock_release();
-		return EINVAL;
 	}
 
 	vfs_biglock_release();
 
-	*ret = &sv->sv_absvn;
-	return 0;
+	return &sv->sv_absvn;
 }

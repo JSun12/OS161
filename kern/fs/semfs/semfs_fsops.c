@@ -65,8 +65,8 @@ semfs_getvolname(struct fs *fs)
  * Get the root directory vnode.
  */
 static
-int
-semfs_getroot(struct fs *fs, struct vnode **ret)
+struct vnode *
+semfs_getroot(struct fs *fs)
 {
 	struct semfs *semfs = fs->fs_data;
 	struct vnode *vn;
@@ -74,12 +74,10 @@ semfs_getroot(struct fs *fs, struct vnode **ret)
 
 	result = semfs_getvnode(semfs, SEMFS_ROOTDIR, &vn);
 	if (result) {
-		kprintf("semfs: couldn't load root vnode: %s\n",
-			strerror(result));
-		return result;
+		panic("semfs: couldn't load root vnode: %s\n",
+		      strerror(result));
 	}
-	*ret = vn;
-	return 0;
+	return vn;
 }
 
 ////////////////////////////////////////////////////////////

@@ -38,7 +38,6 @@
 #include <synch.h>
 #include <mainbus.h>
 #include <vfs.h>          // for vfs_sync()
-#include <lamebus/ltrace.h> // for ltrace_stop()
 
 
 /* Flags word for DEBUG() macro. */
@@ -186,13 +185,6 @@ panic(const char *fmt, ...)
 
 	if (evil == 4) {
 		evil = 5;
-
-		/* Drop to the debugger. */
-		ltrace_stop(0);
-	}
-
-	if (evil == 5) {
-		evil = 6;
 
 		/* Shut down or reboot the system. */
 		mainbus_panic();

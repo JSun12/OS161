@@ -35,16 +35,13 @@
 
 /* Lowest revision we support */
 #define LOW_VERSION   1
-/* Revision that supports ltrace_stop() */
-#define STOP_VERSION  2
 
 struct ltrace_softc *
 attach_ltrace_to_lamebus(int ltraceno, struct lamebus_softc *sc)
 {
 	struct ltrace_softc *lt;
-	uint32_t drl;
 	int slot = lamebus_probe(sc, LB_VENDOR_CS161, LBCS161_TRACE,
-				 LOW_VERSION, &drl);
+				 LOW_VERSION, NULL);
 	if (slot < 0) {
 		return NULL;
 	}
@@ -58,7 +55,6 @@ attach_ltrace_to_lamebus(int ltraceno, struct lamebus_softc *sc)
 
 	lt->lt_busdata = sc;
 	lt->lt_buspos = slot;
-	lt->lt_canstop = drl >= STOP_VERSION;
 
 	lamebus_mark(sc, slot);
 

@@ -30,8 +30,6 @@
 #ifndef _FS_H_
 #define _FS_H_
 
-struct vnode; /* in vnode.h */
-
 
 /*
  * Abstract file system. (Or device accessible as a file.)
@@ -72,7 +70,7 @@ struct fs {
 struct fs_ops {
 	int           (*fsop_sync)(struct fs *);
 	const char   *(*fsop_getvolname)(struct fs *);
-	int           (*fsop_getroot)(struct fs *, struct vnode **);
+	struct vnode *(*fsop_getroot)(struct fs *);
 	int           (*fsop_unmount)(struct fs *);
 };
 
@@ -81,7 +79,7 @@ struct fs_ops {
  */
 #define FSOP_SYNC(fs)        ((fs)->fs_ops->fsop_sync(fs))
 #define FSOP_GETVOLNAME(fs)  ((fs)->fs_ops->fsop_getvolname(fs))
-#define FSOP_GETROOT(fs, ret) ((fs)->fs_ops->fsop_getroot(fs, ret))
+#define FSOP_GETROOT(fs)     ((fs)->fs_ops->fsop_getroot(fs))
 #define FSOP_UNMOUNT(fs)     ((fs)->fs_ops->fsop_unmount(fs))
 
 /* Initialization functions for builtin fake file systems. */

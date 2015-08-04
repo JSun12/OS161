@@ -68,7 +68,7 @@ int sfs_reclaim(struct vnode *v);
 int sfs_loadvnode(struct sfs_fs *sfs, uint32_t ino, int forcetype,
 		struct sfs_vnode **ret);
 int sfs_makeobj(struct sfs_fs *sfs, int type, struct sfs_vnode **ret);
-int sfs_getroot(struct fs *fs, struct vnode **ret);
+struct vnode *sfs_getroot(struct fs *fs);
 
 /* Functions in sfs_io.c */
 int sfs_readblock(struct sfs_fs *sfs, daddr_t block, void *data, size_t len);

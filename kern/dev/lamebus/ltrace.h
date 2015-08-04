@@ -34,7 +34,6 @@ struct ltrace_softc {
 	/* Initialized by lower-level attachment function */
 	void *lt_busdata;
 	uint32_t lt_buspos;
-	bool lt_canstop;
 };
 
 /*
@@ -43,7 +42,6 @@ struct ltrace_softc {
  *   ltrace_off:   turns off the trace161 tracing flag CODE.
  *   ltrace_debug: causes sys161/trace161 to print a message with CODE.
  *   ltrace_dump:  causes trace161 to do a complete state dump, tagged CODE.
- *   ltrace_stop:  causes sys161/trace161 to drop to the debugger.
  *
  * The flags for ltrace_on/off are the characters used to control
  * tracing on the trace161 command line. See the System/161 manual for
@@ -60,15 +58,10 @@ struct ltrace_softc {
  * ltrace_dump dumps the entire system state and is primarily intended
  * for regression testing of System/161. It might or might not prove
  * useful for debugging as well.
- *
- * Calling ltrace_stop behaves similarly to hardwiring a breakpoint
- * instruction in your code, except that debuggers have trouble
- * stepping past hardwired breakpoints. Currently the code is ignored.
  */
 void ltrace_on(uint32_t code);
 void ltrace_off(uint32_t code);
 void ltrace_debug(uint32_t code);
 void ltrace_dump(uint32_t code);
-void ltrace_stop(uint32_t code);
 
 #endif /* _LAMEBUS_LTRACE_H_ */

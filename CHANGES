@@ -11,17 +11,6 @@ various other people, all of whom are (hopefully) listed below.
 
 ------------------------------------------------------------
 
-20150115 dholland	OS/161 2.0 released.
-20150113 dholland	Drop to the debugger on panic.
-20150113 dholland	Document parallelvm -w.
-20150113 dholland	Better man page typesetting. From Katherine Flavel.
-20150108 dholland	Fix FSOP_GETROOT signature/usage so it can fail.
-20150108 dholland	Add several missing man pages for testbin programs.
-20150108 dholland	Fix naming of semaphores in testbin/multiexec.
-20150107 dholland	Also change malloctest* symbols to kmalloctest*. 
-20150107 dholland	Rename kern/malloctest.c to kmalloctest.c for clarity.
-20140924 dholland	Print the kernel build number after linking.
-
 20140924 dholland	OS/161 1.99.08 released. Consider this 2.0-RC1.
 20140924 dholland	Make km3 rotate object sizes as originally intended.
 20140924 dholland	Make frack print a visible divider when it syncs.

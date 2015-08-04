@@ -29,8 +29,6 @@ SUCH DAMAGE.
 <html>
 <head>
 <title>waitpid</title>
-<link rel="stylesheet" type="text/css" media="all" href="../man.css">
-</head>
 <body bgcolor=#ffffff>
 <h2 align=center>waitpid</h2>
 <h4 align=center>OS/161 Reference Manual</h4>
@@ -161,14 +159,14 @@ format.
 <p>
 
 <p>
-(In Unix, but not by default OS/161, you can wait for any of several
-processes by passing magic values of <em>pid</em>, so this return
-value can actually be useful.)
+If you implement WNOHANG, and WNOHANG is given, and the process
+specified by <em>pid</em> has not yet exited, waitpid returns 0.
 </p>
 
 <p>
-If you implement WNOHANG, and WNOHANG is given, and the process
-specified by <em>pid</em> has not yet exited, waitpid returns 0.
+(In Unix, but not by default OS/161, you can wait for any of several
+processes by passing magic values of <em>pid</em>, so this return
+value can actually be useful.)
 </p>
 
 <p>

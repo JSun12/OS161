@@ -559,10 +559,10 @@ static struct {
 	{ "at",		arraytest },
 	{ "bt",		bitmaptest },
 	{ "tlt",	threadlisttest },
-	{ "km1",	kmalloctest },
-	{ "km2",	kmallocstress },
-	{ "km3",	kmalloctest3 },
-	{ "km4",	kmalloctest4 },
+	{ "km1",	malloctest },
+	{ "km2",	mallocstress },
+	{ "km3",	malloctest3 },
+	{ "km4",	malloctest4 },
 #if OPT_NET
 	{ "net",	nettest },
 #endif

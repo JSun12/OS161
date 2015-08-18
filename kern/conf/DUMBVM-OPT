@@ -34,3 +34,5 @@ options sfs			# Always use the file system
 #options netfs			# You might write this as a project.
 
 options dumbvm			# Chewing gum and baling wire.
+#options synchprobs		# Enable this only when doing the
+				# synchronization problems.

@@ -509,11 +509,7 @@ static const char *mainmenu[] = {
 	"[?o] Operations menu                ",
 	"[?t] Tests menu                     ",
 #if OPT_SYNCHPROBS
-	"[sp1] Whale Mating                  ",
-#if 0
-	"[sp2] Cat/mouse                     ",
-	"[sp3] Stoplight                     ",
-#endif
+	"[sp1] Air Balloon                   ",
 #endif
 	"[kh] Kernel heap stats              ",
 	"[khgen] Next kernel heap generation ",

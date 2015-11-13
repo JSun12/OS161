@@ -25,7 +25,8 @@
 static void
 simple_test()
 {
-  	static char writebuf[40] = "Twiddle dee dee, Twiddle dum dum.......\n";
+  	static char writebuf[41] = 
+		"Twiddle dee dee, Twiddle dum dum.......\n";
 	static char readbuf[41];
 
 	const char *file;
@@ -68,6 +69,94 @@ simple_test()
 		errx(1, "Buffer data mismatch!");
 	}
 }
+/*
+ * This tests the very basic functionality of dup2.
+ * We open/create a file, duplicate the file descriptor, 
+ * write the same content to both file descriptors
+ * and check that the written content appears in that 
+ * file twice. 
+ */
+static void
+test_dup2()
+{
+	static char writebuf[41] = 
+		"Twiddle dee dee, Twiddle dum dum.......\n";
+	static char readbuf[81];
+	const char *file;
+	int fd, dupfd, rv;
+
+	file = "testfile";
+
+	fd = open(file, O_WRONLY|O_CREAT|O_TRUNC, 0664);
+	if (fd<0) {
+		err(1, "%s: open for write", file);
+	}
+
+	rv = write(fd, writebuf, 40);
+	if (rv<0) {
+		err(1, "%s: write", file);
+	}
+	
+	dupfd = fd + 1;
+	rv = dup2(fd, dupfd);
+	if (rv<0) {
+		err(1, "%s: write", file);
+	}
+	else if(rv != dupfd)
+	{
+		err(1, "dup2() returned %d, expected %d\n", rv, dupfd);
+	}
+
+	rv = write(dupfd, writebuf, 40);
+	if (rv<0) {
+		err(1, "%s: write via duplicated fd", file);
+	}
+
+	rv = close(fd);
+	if (rv<0) {
+		err(1, "%s: close (original fd)", file);
+	}
+
+	rv = close(dupfd);
+	if (rv<0) {
+		err(1, "%s: close (duplicate)", file);
+	}
+
+	fd = open(file, O_RDONLY);
+	if (fd<0) {
+		err(1, "%s: open for read", file);
+	}
+
+	rv = read(fd, readbuf, 80);
+	if (rv<0) {
+		err(1, "%s: read", file);
+	}
+
+	rv = close(fd);
+	if (rv<0) {
+		err(1, "%s: close (3d time)", file);
+	}
+
+	/* ensure null termination */
+	readbuf[80] = 0;
+
+	/* Compare the second half */
+	if (strcmp(&readbuf[40], writebuf))
+	{
+		errx(1, "Buffer data mismatch!");
+	}
+
+	/* Put a null terminator after the expected
+	 * end of the first string and compare 
+	 */
+	readbuf[40] = 0;
+	if (strcmp(readbuf, writebuf)) 
+	{
+		errx(1, "Buffer data mismatch!");
+	}
+}
+
+
 
 static int openFDs[OPEN_MAX-3 + 1];
 
@@ -142,8 +231,8 @@ test_openfile_limits()
 static void
 simultaneous_write_test()
 {
-  	static char writebuf1[41] = "Cabooble-madooddle, bora-bora-bora.....\n\0";
-	static char writebuf2[41] = "Yada, yada, yada, yada, yada, yada.....\n\0";
+  	static char writebuf1[41] = "Cabooble-madooddle, bora-bora-bora.....\n";
+	static char writebuf2[41] = "Yada, yada, yada, yada, yada, yada.....\n";
 	static char readbuf[41];
 	static int seekpos = 20; // must be less than the writebuf length
 
@@ -213,12 +302,56 @@ simultaneous_write_test()
 	}
 
 	rv = close(fd2);
-	if (rv<0) {
+	if (rv<0)
+	{
 		err(1, "%s: close", file2);
 	}
 
 }
 
+static void
+_getcwd(char *buf, int len)
+{
+	int ret;
+
+	ret = __getcwd(buf, len);
+	if(ret < 0)
+	{
+		err(1, "__getcwd");
+	}
+	if(ret > len)
+	{
+		err(1, "Unexpected return value from __getcwd: %d\n",
+		    ret);
+	}
+
+	/* Ensure null termination. */
+	buf[ret] = 0;
+
+}
+
+/*
+ * This test is really simple. We want it to run on emufs,
+ * and we can't do more sophisticated things with directories
+ * here. 
+ */
+static void
+dir_test()
+{
+	char chdir_name[] = "testbin";
+	char buf[NAME_MAX+1];
+	int ret;
+
+	_getcwd(buf, NAME_MAX);
+	printf("__getcwd returned: %s\n", buf);
+
+	ret = chdir(chdir_name);
+	if(ret)
+	{
+		err(1, "chdir into %s", chdir_name);
+	}
+}
+			
 
 /* This test takes no arguments, so we can run it before argument passing
  * is fully implemented. 
@@ -227,13 +360,21 @@ int
 main()
 {
 	test_openfile_limits();
-	printf("Passed Part 1 of filesyscalls test\n");
+	printf("Passed Part 1 of fsyscalltest\n");
 
 	simple_test();
-	printf("Passed Part 2 of filesyscalls test\n");
+	printf("Passed Part 2 of fsyscalltest\n");
 	
 	simultaneous_write_test();
-	printf("Passed Part 3 of filesyscalls test\n");
+	printf("Passed Part 3 of fsyscalltest\n");
+	
+	test_dup2();
+	printf("Passed Part 4 of fsyscalltest\n");
+
+	dir_test();
+	printf("Passed Part 5 of fsyscalltest\n");
+	
+	printf("All done!\n");
 	
 	return 0;
 }

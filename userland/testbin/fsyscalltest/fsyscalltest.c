@@ -100,7 +100,7 @@ test_dup2()
 	dupfd = fd + 1;
 	rv = dup2(fd, dupfd);
 	if (rv<0) {
-		err(1, "%s: write", file);
+		err(1, "%s: dup2", file);
 	}
 	else if(rv != dupfd)
 	{

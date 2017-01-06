@@ -112,7 +112,7 @@ cat > __conftest.c <<EOF
 int
 main()
 {
-    return ntohll(0xbeefbeefbeefbeefULL) != 0;
+      return ntohll(0xbeefbeefbeefbeefULL) == 0;
 }
 EOF
 

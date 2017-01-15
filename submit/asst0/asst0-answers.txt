@@ -1,0 +1,135 @@
+ASSIGNMENT 0 QUESTIONS:
+
+Step 1. First of all, let's make sure you can run System/161. In a shell, invoke sys161 (you should know how to do that if you have complete step 1) and copy the output of that command into your submit file.
+
+    The following is output upon invoking sys161:
+
+    Jacob@dhcp-206-12-67-176:~/os161/root$ sys161 kernel
+    sys161: System/161 release 2.0.3, compiled Jan  5 2017 13:30:53
+
+    OS/161 base system version 1.99.08
+    Copyright (c) 2000, 2001-2005, 2008-2011, 2013, 2014
+       President and Fellows of Harvard College.  All rights reserved.
+
+    Put-your-group-name-here's system version 0 (DUMBVM #1)
+
+    292k physical memory available
+    Device probe...
+    lamebus0 (system main bus)
+    emu0 at lamebus0
+    ltrace0 at lamebus0
+    ltimer0 at lamebus0
+    beep0 at ltimer0
+    rtclock0 at ltimer0
+    lrandom0 at lamebus0
+    random0 at lrandom0
+    lhd0 at lamebus0
+    lhd1 at lamebus0
+    lser0 at lamebus0
+    con0 at lser0
+
+    cpu0: MIPS/161 (System/161 2.x) features 0x0
+    OS/161 kernel [? for menu]: ?
+
+    OS/161 kernel menu
+        [?o] Operations menu                [khgen] Next kernel heap generation
+        [?t] Tests menu                     [khdump] Dump kernel heap
+        [kh] Kernel heap stats              [q] Quit and shut down
+
+    Operation took 0.477954360 seconds
+    OS/161 kernel [? for menu]: q
+    Shutting down.
+    The system is halted.
+    sys161: 281742612 cycles (45725655 run, 236016957 global-idle)
+    sys161:   cpu0: 8413164 kern, 0 user, 0 idle; 11907 ll, 11907/0 sc, 44592 sync
+    sys161: 1806 irqs 0 exns 0r/0w disk 4r/919w console 0r/0w/1m emufs 0r/0w net
+    sys161: Elapsed real time: 9.705734 seconds (29.0285 mhz)
+    sys161: Elapsed virtual time: 11.273994165 seconds (25 mhz)
+
+Step 2. Now, let's make sure that you got your git repository working. From any directory in your git-controlled source tree, type: "git log". Copy the output of this command into your submit file.
+
+    Git log gives the following messages:
+
+    commit a0199f86ee70dad54eece6b26e751dd203637494
+    Author: Jacob Budzis <jrbudzis@alumni.ubc.ca>
+    Date:   Thu Jan 5 17:55:55 2017 -0800
+
+        Kernel is working on MacOS with no issues
+
+    commit fb377b5bba7f862670755271a28fc0267e2e456a
+    Author: Jacob Budzis <jrbudzis@alumni.ubc.ca>
+    Date:   Thu Jan 5 14:03:30 2017 -0800
+
+        Initial commit of os161 for CPEN331
+
+Step 3. Next execute the git tag command and copy/paste its output into your submit file
+
+    Git tag gives the following message:
+    asst0-start
+
+Q1. In the book chapters and in class you were introduced to the mechanisms used to transfer control between user processes and the operating system. Tell us where we can find the first line of OS/161 code that is executed when a trap occurs. Then tell us where control gets transferred to from that point. What about an interrupt? How does that differ?
+
+    The first line of code that is executed when a trap occurs is the common_exception function found in the file src/kern/arch/mips/locore/exception-mips1.S. This will then lead to the calling of mips_trap() which is located in kern/arch/mips/locore/trap.c. This function will extract information from the registers of the process to determine what type of trap/interrupt/exception has occurred and put it into a struct called a trapframe. If the user is requesting kernel operations, thus invoking a trap, syscall(trapframe) will be called from kern/arch/mips/syscall/syscall.c. If an interrupt occurs then mainbus_interrupt(trapframe) will be called from kern/arch/sys161/dev/lamebus_machdep.c.
+
+Q2. Making a system call, such as write, ultimately leads to a trap. Find the code in OS/161 that invokes system calls from user programs and causes traps. In which file and on which lines did you find this code?
+
+    As mentioned in the previous question, system calls are invoked by the mips_trap() function which is the general exception handler for OS161. The specific line of code where the syscall() occurs is line 224 in kern/arch/mips/locore/trap.c.
+
+Q3. Why do you suppose there are libc functions in the "common" part of the source tree (common/libc) as well as in userland/lib/libc?
+
+    We have a separate copy of libc functions for the kernel and the user to add a layer of protection between the two. This would mean that the user could modify their version of the libc functions and the kernel would not be affected by the changes as it would be using a separate set of libc functions.
+
+Q4. Name two things that configure configures. What might invalidate that configuration and make you need/want to rerun it?
+
+    Two things that the configure file configures are:
+        1. The default location of the os161 build tree. This is done by setting the path in the variable named "OSTREE". An example is my OSTREE is configured as "OSTREE='$(HOME)/os161/root'".
+        2. The system and machine information that is given to the makefiles. This information may be found in the defs.mk definitions file.
+    You need to rerun this every time you use a different computer with a different OS as you need to update machine and system settings.
+
+Q5. What are some of the details which would make a function "machine dependent"? Why might it be important to maintain this separation, instead of just putting all of the code in one function?
+
+    There are many details based on the computer architecture that can make a function machine dependent. These include the endianness of words, size of instructions, number of registers, and so on. It is important to maintain this separation as it allows for the hardware details to be abstracted into a single location. This is useful as it allows for the user to recreate a small portion of the binary when switching systems, rather than recompiling the entire kernel.
+
+
+Q6. How large is a trapframe? Why?
+
+    The trapframe is 37 registers big. This is found in mips_trap() in a comment on line 133 as well as by counting the number of registers in kern/arch/mips/include/trapframe.h. It is this big so that it can capture all of MIPS registers and pass them to an exception handler to determine the cause of the exception.
+
+Q7. Under what circumstances should you re-run the kern/conf/config script?
+
+    You should re-run this script whenever a change is made to the source tree, such as by adding or modifying code, when you want to use new build options, or when the kernel config file is modified.
+
+Q8. Under what circumstances should you run bmake depend in kern/compile/DUMBVM?
+
+    You should run "bmake depend" when header file inclusions are changed, or when the config script is rerun.
+
+Q9. Under what circumstances should you run bmake or bmake install in kern/compile/DUMBVM?
+
+    Whenever a change is made to the kern/compile/DUMBVM source code that depends on C files rather than merely headers, new code must be compiled with bmake. To put this code in the proper place in ~/os161/root we run bmake install.
+
+Q10. When you booted your kernel, you found that there were several commands that you could issue to experiment with it. Explain exactly where and what you would have to do to add a command that printed out, "Hello world!"
+
+    To add a command that printed out "Hello world!" from the kernel boot menu, we would need to do the following modifications to src/kern/main/menu.c:
+        1. Add the add the command to the cmdtable[] found on line 527.
+        2. Create an entry for the command in the *opstable[] on line 434 so the user can be aware of the command.
+        3. Write a function for the command above line 405, in the region with the other commands. I'm going to assume that this question doesn't want to see an implementation of said command.
+
+Q11. Why do we need to include these in your OS/161 distribution? Why can't you just use the standard utilities that are present on the machine on which you're working?
+
+    OS161 runs on a virtual machine within the machine that I am currently working on. It has no way to access the standard utilities outside of it's virtual machine, thus it needs to be provided with its own set.
+
+Q12. When a user program exits, what is done with the program's return value?
+
+    From the assembly code in src/userland/lib/crt0/mips/crt0.S we can see that the return value is saved in register s0 and put in the a0 register as an argument to exit.
+
+Q13. Imagine that you wanted to add a new system call. List all the places that you would need to modify/add code. Then review your answers to questions 7-9 and note which of those actions you need to take in order to test the new system call.
+
+    In order to add a syscall, one would need to make modifications in the following places:
+        1. Add a macro for the syscall in src/kern/include/kern/syscall.h.
+        2. Add the syscall's function prototype to src/kern/include/syscall.h.
+        3. Add a case for the syscall macro's value in the switch statement in syscall() located in src/kern/arch/mips/syscall/syscall.c.
+        4. Add the syscall's function to the folder located at src/kern/syscall. This should be similar to the time_syscall.c function already present in the folder.
+
+    We must now do the following commands from the previous questions:
+        1. Rerun the config script as we have added new files.
+        2. Rerun bmake depend as we have reconfigured the system.

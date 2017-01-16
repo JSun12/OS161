@@ -1,0 +1,85 @@
+ASSIGNMENT 1 QUESTIONS:
+
+Q1. What is the name of the very first function that executes when OS161 starts up?
+
+    Upon initializing the GDB debugger and attaching it to my kernel, the first function that executes is __start: in ../../arch/sys161/main/start.S.
+
+Q2. What is the very first assembly instruction that executes?
+
+    The very first assembly instruction that executes is on line 54 of ../../arch/sys161/main/start.S.
+    │52         .frame sp, 24, $0    /* 24-byt sp-relative frame; return addr o│
+    │53         .mask 0x80000000, -4 /* register 31 (ra) saved at (sp+24)-4 */  │
+   >│54         addiu sp, sp, -24
+
+Q3. Set the breakpoints in the kernel function that shows the menu and in the kernel main function. Now tell GDB to display all the breakpoints that were set and copy the output to your submit file.
+
+    (gdb) info breakpoints
+    Num     Type           Disp Enb Address    What
+    1       breakpoint     keep y   0x800139e4 in kmain at ../../main/main.c:211
+    2       breakpoint     keep y   0x80014a0c in menu at ../../main/menu.c:697
+
+Q4. Briefly describe what happens between the beginning of the execution and the invocation of the kernel main function.
+
+    Between the beginning of execution and the invocation of the kernel's main function, the following occurs.
+        1. Add _end in a saved register.
+        2. Save a boot argument string.
+        3. Create an empty page of memory.
+        4. Set up a stack frame with a return address & four argument slots.
+        5. Add exception handler code onto the first page of memory.
+        6. Flush the instruction cache.
+        7. Initialize the TLB.
+        8. Set up the status registers.
+        9. Load the number of CPUs.
+        10. Load the GP register.
+        11. Boot through kmain().
+
+Q5. What is the assembly language instruction that calls the kernel main function?
+
+    The assembly instruction that calls kmain is
+    215|    jal kmain
+    Found on the 215th line of ../../arch/sys161/main/start.S.
+
+Q6. Step through the boot() code to find out what functions are called during early initialization. Paste the gdb output that shows you what these functions are.
+
+    The gdb output that shows me what these functions are:
+    │108             /* Early initialization. */
+    │109             ram_bootstrap();                                           │
+    │110             proc_bootstrap();                                          │
+    │111             thread_bootstrap();                                        │
+    │112             hardclock_bootstrap();                                     │
+    │113             vfs_bootstrap();                                           │
+    │114             kheap_nextgeneration();
+
+Q7. Set a breakpoint in thread_bootstrap(). Once you hit that breakpoint, at the very first line of that function, attempt to print the contents of the *bootcpu variable. Copy the output into the submit file.
+
+    (gdb) p *bootcpu
+    Cannot access memory at address 0x80000
+
+Q8. Now, step through that function until after the line that says 'bootcpu = cpu_create(0)'. Now print the content of *bootcpu and paste the output.
+
+    (gdb) p bootcpu
+    {c_self = 0x8003af00, c_number = 0, c_hardware_number = 0,
+  c_curthread = 0x8003bf80, c_zombies = {tl_head = {tln_prev = 0x0,
+      tln_next = 0x8003af1c, tln_self = 0x0}, tl_tail = {
+      tln_prev = 0x8003af10, tln_next = 0x0, tln_self = 0x0}, tl_count = 0},
+  c_hardclocks = 0, c_spinlocks = 0, c_isidle = false, c_runqueue = {
+    tl_head = {tln_prev = 0x0, tln_next = 0x8003af44, tln_self = 0x0},
+    tl_tail = {tln_prev = 0x8003af38, tln_next = 0x0, tln_self = 0x0},
+    tl_count = 0}, c_runqueue_lock = {splk_lock = 0, splk_holder = 0x0},
+  c_ipi_pending = 0, c_shootdown = {{ts_placeholder = 0} <repeats 16 times>},
+  c_numshootdown = 0, c_ipi_lock = {splk_lock = 0, splk_holder = 0x0}}
+
+Q9. Print the allcpus array before the boot() function is executed. Paste the output.
+
+    (gdb) cpuarray allcpus
+    0 cpus
+
+Q10. Print again the same array after the boot() function is executed. Paste the output.
+
+    (gdb) cpuarray allcpus
+    c_isidle = false, c_runqueue = {tl_head = {tln_prev = 0x0, tln_next = 0x8003a
+    f44, tln_self = 0x0}, tl_tail = {tln_prev = 0x8003af38, tln_next = 0x0,
+      tln_self = 0x0}, tl_count = 0}, c_runqueue_lock = {splk_lock = 0, splk_ho
+    lder = 0x0}, c_ipi_pending = 0, c_shootdown = {{
+      ts_placeholder = 0} <repeats 16 times>}, c_numshootdown = 0, c_ipi_lock =
+    {splk_lock = 0, splk_holder = 0x0}}

@@ -1,3 +1,0 @@
-$(MYBUILDDIR)/quinthuge.o: \
- quinthuge.c \
- $(INSTALLTOP)/include/test/quint.h

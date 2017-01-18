@@ -1,2 +1,0 @@
-$(MYBUILDDIR)/usemtest.ho: \
- usemtest.c

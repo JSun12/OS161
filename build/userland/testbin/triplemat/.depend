@@ -1,3 +1,0 @@
-$(MYBUILDDIR)/triplemat.o: \
- triplemat.c \
- $(INSTALLTOP)/include/test/triple.h

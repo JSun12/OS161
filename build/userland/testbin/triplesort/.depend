@@ -1,3 +1,0 @@
-$(MYBUILDDIR)/triplesort.o: \
- triplesort.c \
- $(INSTALLTOP)/include/test/triple.h

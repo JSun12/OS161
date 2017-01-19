@@ -1,0 +1,61 @@
+ASSIGNMENT 2 CODE READING EXERCISE:
+
+Q1. What happens to a thread when it exits (i.e., calls thread_exit())? What about when it sleeps?
+
+    When a thread exits (thread_exit)it will perform the following actions:
+        1. The process running on the thread is detached from the thread by proc_remthread.
+        2. Check that the detach was successful.
+        3. Check to see if the kernel-level stack had been overflowed using the function thread_checkstack. This is specifically done by looking at a series of 4 magic numbers at the bottom of the stack.
+        4. Turn off interrupts on the current processor.
+        5. Invoke thread_switch to put the current thread on the CPU's zombie list.
+        6. Thread_switch should choose a new process for the current thread.
+        7. If the above does not occur, cause a kernel panic.
+    When a thread sleeps (wchan_sleep) it will perform the following action:
+        1. Assert that it is not in an interrupt handler.
+        2. Assert that it's holding a spinlock so check upon awaking.
+        3. Assert that it only holds one spinlock.
+        4. Invoke thread_switch to put the thread in a queue to unsleep. Upon being added, release the spinlock.
+        5. If the above fails, release the spinlock.
+
+Q2. What function(s) handle(s) a context switch?
+
+    The function thread_switch, as well as all functions contained within, handle a context switch. Note that this does not include code after switchframe_switch.
+
+Q3. What does it mean for a thread to be in each of the possible thread states?
+
+    States:
+        S_RUN: The thread is currently running.
+        S_READY: The thread is ready to be run by the CPU.
+        S_SLEEP: The thread is put into a waiting channel until the CPU will attempt to wake it up.
+        S_ZOMBIE: The thread has been exited but it the CPU still holds a copy in the curcpu -> czombies list until the list is exorcised.
+
+Q4. What does it mean to turn interrupts off? How is this accomplished? Why is it important to turn off interrupts in the thread subsystem code?
+
+    Turning interrupts off does not allow the CPU to switch the current thread. This is accomplished through the use of functions in spl.c. It is important to turn off interrupts in thread subsystem code as an interrupt may stop the CPU's code in a state where it will cause a deadlock or not allow a thread to sleep properly.
+
+
+Q5. What happens when a thread wakes up another thread? How does a sleeping thread get to run again?
+
+    When a thread is ready to sleep, thread_switch is invoked. It will place the current thread to sleep and look in the curcpu->c_runqueue for the next thread to use. The switch will occur in the registers. The cpu will be then set to run, active it's thread's address, clean up any zombies, and unlock & turn off interrupts (which were set at the beginning of the function).
+
+Q6. What function(s) choose(s) the next thread to run?
+
+    The function thread_switch chooses which next thread will run by checking threadlist_remhead(&curcpu->c_runqueue).
+
+Q7. How does it (do they) pick the next thread?
+
+    The cpu will look at c_runqueue for the next thread in the queue. The data structure used to implement the c_runqueue is a linkedlist, so there is FIFO priority.
+
+Q8. What role does the hardware timer play in scheduling? What hardware independent function is called on a timer interrupt?
+
+    The hardware timer allows for threads to be given an equal time during scheduling. The hardware independent function that handles this is hardclock().
+
+Q9. Describe how wchan_sleep() and wchan_wakeone() are used to implement semaphores.
+
+    The semaphore function exists in synch.c. We initialize a semaphore with some initial count, which is the number of threads that can be running at one time (usually through some critical section). The P function is called when a thread wants to request entry to that channel. If there is a count > 0, the thread is allowed through and count is decremented. Otherwise the thread is put to sleep with wchan_sleep(). V is called when we want to wake up a sleeping function and we have a count > 0. This is where the wchan_wakeone is called.
+
+Q10. How does the implementation of wchan ensure that a thread never misses a wakeup signal: that another thread cannot attempt to awaken the first thread just as it is preparing to sleep, but before it is actually placed into the sleep queue?
+
+    Wchan ensures that a thread never misses a wakeup call as it holds all the waiting threads in an internal waiting list (wc_threads) to be taken out in FIFO order.
+
+    Another thread may not attempt to awaken the the first thread in the sleep queue in this inbetween stage as the wchan_sleep function holds a spinlock that only allows the current CPU to be manipulating wchan_sleep.

@@ -29,6 +29,8 @@
 
 #ifndef _SYNCH_H_
 #define _SYNCH_H_
+#define TRUE 1
+#define FALSE 0
 
 /*
  * Header file for synchronization primitives.
@@ -44,10 +46,10 @@
  * internally.
  */
 struct semaphore {
-        char *sem_name;
+    char *sem_name;
 	struct wchan *sem_wchan;
 	struct spinlock sem_lock;
-        volatile unsigned sem_count;
+    volatile unsigned sem_count;
 };
 
 struct semaphore *sem_create(const char *name, unsigned initial_count);
@@ -70,12 +72,17 @@ void V(struct semaphore *);
  * when the lock is destroyed, no thread should be holding it.
  *
  * The name field is for easier debugging. A copy of the name is
- * (should be) made internally.
+ * made internally.
+ *
+ * The flag field indicates the status of the lock. If the flag is
+ * 0, the lock is available.
  */
 struct lock {
-        char *lk_name;
-        // add what you need here
-        // (don't forget to mark things volatile as needed)
+    char *lk_name;
+	struct wchan *lk_wchan;
+	struct spinlock lk_lock;
+	struct thread *lk_thread;
+	volatile int *lk_flag;
 };
 
 struct lock *lock_create(const char *name);

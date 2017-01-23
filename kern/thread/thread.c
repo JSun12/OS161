@@ -595,27 +595,27 @@ thread_switch(threadstate_t newstate, struct wchan *wc, struct spinlock *lk)
 	/* Put the thread in the right place. */
 	switch (newstate) {
 	    case S_RUN:
-		panic("Illegal S_RUN in thread_switch\n");
+			panic("Illegal S_RUN in thread_switch\n");
 	    case S_READY:
-		thread_make_runnable(cur, true /*have lock*/);
+			thread_make_runnable(cur, true /*have lock*/);
 		break;
-	    case S_SLEEP:
-		cur->t_wchan_name = wc->wc_name;
-		/*
-		 * Add the thread to the list in the wait channel, and
-		 * unlock same. To avoid a race with someone else
-		 * calling wchan_wake*, we must keep the wchan's
-		 * associated spinlock locked from the point the
-		 * caller of wchan_sleep locked it until the thread is
-		 * on the list.
-		 */
-		threadlist_addtail(&wc->wc_threads, cur);
-		spinlock_release(lk);
-		break;
+	    	case S_SLEEP:
+			cur->t_wchan_name = wc->wc_name;
+			/*
+		 	* Add the thread to the list in the wait channel, and
+		 	* unlock same. To avoid a race with someone else
+		 	* calling wchan_wake*, we must keep the wchan's
+		 	* associated spinlock locked from the point the
+		 	* caller of wchan_sleep locked it until the thread is
+		 	* on the list.
+		 	*/
+			threadlist_addtail(&wc->wc_threads, cur);
+			spinlock_release(lk);
+			break;
 	    case S_ZOMBIE:
-		cur->t_wchan_name = "ZOMBIE";
-		threadlist_addtail(&curcpu->c_zombies, cur);
-		break;
+			cur->t_wchan_name = "ZOMBIE";
+			threadlist_addtail(&curcpu->c_zombies, cur);
+			break;
 	}
 	cur->t_state = newstate;
 

@@ -75,7 +75,8 @@ void V(struct semaphore *);
  * made internally.
  *
  * The flag field indicates the status of the lock. If the flag is
- * 0, the lock is available.
+ * FALSE the lock is available. TRUE and FALSE are defined as 1 and 0
+ * in the current header file.
  */
 struct lock {
     char *lk_name;
@@ -119,9 +120,9 @@ bool lock_do_i_hold(struct lock *);
  */
 
 struct cv {
-        char *cv_name;
-        // add what you need here
-        // (don't forget to mark things volatile as needed)
+    char *cv_name;
+    struct spinlock cv_lock;
+    struct wchan *cv_wchan;
 };
 
 struct cv *cv_create(const char *name);

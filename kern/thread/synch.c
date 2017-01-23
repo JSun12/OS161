@@ -180,8 +180,8 @@ lock_destroy(struct lock *lock)
 	/* wchan_cleanup will assert if anyone's waiting on it */
 	wchan_destroy(lock->lk_wchan);
     spinlock_cleanup(&lock->lk_lock);
+    kfree((void *)lock->lk_flag);
 	kfree(lock->lk_thread);
-	//kfree((void *)lock->lk_flag);
     kfree(lock->lk_name);
     kfree(lock);
 }
@@ -197,6 +197,7 @@ lock_acquire(struct lock *lock)
         wchan_sleep(lock->lk_wchan, &lock->lk_lock);
         // Recheck the flag's status before proceeding
     }
+    
     KASSERT(lock->lk_flag == (int*) FALSE);
 
     lock->lk_flag = (int*) 1;

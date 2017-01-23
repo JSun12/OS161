@@ -116,7 +116,7 @@ bool lock_do_i_hold(struct lock *);
  * guarantees are made about scheduling.
  *
  * The name field is for easier debugging. A copy of the name is
- * (should be) made internally.
+ * made internally.
  */
 
 struct cv {

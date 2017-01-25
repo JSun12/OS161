@@ -197,7 +197,7 @@ lock_acquire(struct lock *lock)
         wchan_sleep(lock->lk_wchan, &lock->lk_lock);
         // Recheck the flag's status before proceeding
     }
-    
+
     KASSERT(lock->lk_flag == (int*) FALSE);
 
     lock->lk_flag = (int*) 1;

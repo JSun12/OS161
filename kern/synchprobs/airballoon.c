@@ -40,6 +40,7 @@ dandelion(void *p, unsigned long arg)
 	(void)arg;
 
 	kprintf("Dandelion thread starting\n");
+	thread_yield(); // Yield to allow all actors to load before modifiying ropes
 
 	while (ropes_left > 0){
 		int next = random() % NROPES;
@@ -60,10 +61,12 @@ dandelion(void *p, unsigned long arg)
 
 			kprintf("Dandelion severed rope %d\n", ropes[next].rp_hook);
 			lock_release(ropes[next].rp_lock);
+			thread_yield();
 		}
 	}
 	lock_acquire(balloon_lk);
 	cv_broadcast(balloon_cv, balloon_lk);
+	lock_release(balloon_lk);
 
 	kprintf("Dandelion thread done\n");
 	thread_exit();
@@ -77,6 +80,7 @@ marigold(void *p, unsigned long arg)
 	(void)arg;
 
 	kprintf("Marigold thread starting\n");
+	thread_yield(); // Yield to allow all actors to load before modifiying ropes
 
 	while (ropes_left > 0){
 		int next = random() % NROPES;
@@ -97,6 +101,7 @@ marigold(void *p, unsigned long arg)
 
 			kprintf("Marigold severed rope %d from stake %d\n", ropes[next].rp_hook, ropes[next].rp_stake);
 			lock_release(ropes[next].rp_lock);
+			thread_yield();
 		}
 	}
 
@@ -112,6 +117,7 @@ flowerkiller(void *p, unsigned long arg)
 	(void)arg;
 
 	kprintf("Lord FlowerKiller thread starting\n");
+	thread_yield(); // Yield to allow all actors to load before modifiying ropes
 
 	while (ropes_left > 0){
 		int next = random() % NROPES;
@@ -125,14 +131,15 @@ flowerkiller(void *p, unsigned long arg)
 			}
 
 			int old_stake = ropes[next].rp_stake;
-			int new_stake = random() % NROPES;
+			int new_stake = random() % NROPES + 1;
  			while (new_stake == old_stake){
-				new_stake = random() % NROPES;
+				new_stake = random() % NROPES + 1;
 			}
 			ropes[next].rp_stake = new_stake;
 
 			kprintf("Lord FlowerKiller switched rope %d from stake %d to stake %d\n", ropes[next].rp_hook, old_stake, new_stake);
 			lock_release(ropes[next].rp_lock);
+			thread_yield();
 		}
 	}
 	kprintf("Lord FlowerKiller thread done\n");
@@ -147,11 +154,14 @@ balloon(void *p, unsigned long arg)
 	(void)arg;
 
 	kprintf("Balloon thread starting\n");
+	thread_yield(); // Yield to allow all actors to load before modifiying ropes
 
 	lock_acquire(balloon_lk);
 
 	if (ropes_left > 0)
 		cv_wait(balloon_cv, balloon_lk);
+
+	lock_release(balloon_lk);
 
 	kprintf("Balloon freed and Prince Dandelion escapes!\n");
 	kprintf("Balloon thread done\n");
@@ -164,9 +174,10 @@ int
 airballoon(int nargs, char **args)
 {
 	//TODO: Implement non-random item selection, but rather by array index
-	//TODO: Clean up locks
+	//TODO: Clean up locks kfree()
 	//TODO: Delete the global char aray -> malloc it's ass
 	//TODO: The balloon cv seems to not be working properly. Look into this...
+	//TODO: Return to the menu properly -> It pops up too early
 
 	(void)nargs;
 	(void)args;
@@ -179,8 +190,8 @@ airballoon(int nargs, char **args)
 
 	for (int i = 0; i < NROPES; i++){
 		ropes[i].rp_lock = lock_create("");
-		ropes[i].rp_stake = i;
-		ropes[i].rp_hook = i;
+		ropes[i].rp_stake = i + 1;
+		ropes[i].rp_hook = i + 1;
 		ropes[i].rp_cut = false;
 	}
 
@@ -211,5 +222,6 @@ panic:
 
 done:
 	ropes_left = NROPES;
+	kprintf("Balloon thread done\n");
 	return 0;
 }

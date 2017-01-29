@@ -9,9 +9,11 @@
 
 #define NROPES 16
 #define NTHREADS 5
+#define NSLEEP 0
 
 static int ropes_left = NROPES;
 static int threads_left = NTHREADS;
+static int threads_sleep = NSLEEP;
 
 // Data structures for rope mappings
 
@@ -26,7 +28,8 @@ struct rope ropes[NROPES];
 // Synchronization primitives
 
 struct lock *ropes_left_lk;
-struct lock *threads_left_lk;
+struct lock *threads_lk;
+struct cv *threads_cv;
 
 /*
  * Describe your design and any invariants or locking protocols
@@ -66,15 +69,17 @@ dandelion(void *p, unsigned long arg)
 			thread_yield();
 		}
 	}
-	lock_acquire(threads_left_lk);
-	threads_left--;
-	lock_release(threads_left_lk);
 
-	while(threads_left > 2){
-		thread_yield(); // Yield until all other actors are done
-	}
+	lock_acquire(threads_lk);
+
+	threads_sleep++;
+	cv_wait(threads_cv, threads_lk);
 
 	kprintf("Dandelion thread done\n");
+	threads_left--;
+
+	lock_release(threads_lk);
+
 	thread_exit();
 }
 
@@ -110,15 +115,16 @@ marigold(void *p, unsigned long arg)
 			thread_yield();
 		}
 	}
-	lock_acquire(threads_left_lk);
-	threads_left--;
-	lock_release(threads_left_lk);
+	lock_acquire(threads_lk);
 
-	while(threads_left > 2){
-		thread_yield(); // Yield until all other actors are done
-	}
+	threads_sleep++;
+	cv_wait(threads_cv, threads_lk);
 
 	kprintf("Marigold thread done\n");
+	threads_left--;
+
+	lock_release(threads_lk);
+
 	thread_exit();
 }
 
@@ -155,15 +161,16 @@ flowerkiller(void *p, unsigned long arg)
 			thread_yield();
 		}
 	}
-	lock_acquire(threads_left_lk);
-	threads_left--;
-	lock_release(threads_left_lk);
+	lock_acquire(threads_lk);
 
-	while(threads_left > 2){
-		thread_yield(); // Yield until all other actors are done
-	}
+	threads_sleep++;
+	cv_wait(threads_cv, threads_lk);
 
 	kprintf("Lord FlowerKiller thread done\n");
+	threads_left--;
+
+	lock_release(threads_lk);
+
 	thread_exit();
 }
 
@@ -176,16 +183,17 @@ balloon(void *p, unsigned long arg)
 
 	kprintf("Balloon thread starting\n");
 
-	while(threads_left > 2){
-		thread_yield(); // Yield until all other actors are done
-	}
+	lock_acquire(threads_lk);
 
-	lock_acquire(threads_left_lk);
-	threads_left--;
-	lock_release(threads_left_lk);
+	threads_sleep++;
+	cv_wait(threads_cv, threads_lk);
 
 	kprintf("Balloon freed and Prince Dandelion escapes!\n");
 	kprintf("Balloon thread done\n");
+	threads_left--;
+
+	lock_release(threads_lk);
+
 	thread_exit();
 }
 
@@ -198,8 +206,6 @@ airballoon(int nargs, char **args)
 	//TODO: Clean up locks kfree()
 	//TODO: Delete the global char aray -> malloc it's ass
 	//TODO: The balloon cv seems to not be working properly. Look into this...
-	//TODO: Return to the menu properly -> It pops up too early -> Fixed with a busy wait, but that's not optimal -> Put main on a cv?
-	//TODO: Read ropes_left atomically?
 	//TODO: Lock the threads with spinlocks rather than sleepers
 
 	(void)nargs;
@@ -208,7 +214,8 @@ airballoon(int nargs, char **args)
 	int err = 0;
 
 	ropes_left_lk = lock_create("");
-	threads_left_lk = lock_create("");
+	threads_lk = lock_create("");
+	threads_cv = cv_create("");
 
 	for (int i = 0; i < NROPES; i++){
 		ropes[i].rp_lock = lock_create("");
@@ -243,10 +250,32 @@ panic:
 	      strerror(err));
 
 done:
-	while(threads_left > 1){
-		thread_yield(); // Yield until all other actors are done
+	while(threads_sleep != 4){
+		thread_yield(); // Yield until all actors are waiting
 	}
+
+	lock_acquire(threads_lk);
+	cv_broadcast(threads_cv, threads_lk);
+	lock_release(threads_lk);
+
+	while(threads_left != 1){
+		thread_yield(); // Yield until all actors finish
+	}
+
+	// Reset all variables to allow for multiple airballoon calls
 	ropes_left = NROPES;
+	threads_left = NTHREADS;
+	threads_sleep = NSLEEP;
+
+	// Clean up before exit
+	lock_destroy(ropes_left_lk);
+	lock_destroy(threads_lk);
+	cv_destroy(threads_cv);
+	for (int i = 0; i < NROPES; i++){
+		lock_destroy(ropes[i].rp_lock);
+	}
+
+
 	kprintf("Main thread done\n");
 	return 0;
 }

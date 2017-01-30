@@ -11,8 +11,7 @@
 static int ropes_left = NROPES;
 static int threads_left = NTHREADS;
 static int threads_sleep = NSLEEP;
-
-struct rope *ropes;
+static struct rope *ropes;
 
 /*
  * Locks:
@@ -72,12 +71,10 @@ dandelion(void *p, unsigned long arg)
 			thread_yield();
 		}
 	}
-
 	lock_acquire(threads_lk);
 
 	threads_sleep++;
 	cv_wait(threads_cv, threads_lk);
-
 	kprintf("Dandelion thread done\n");
 	threads_left--;
 
@@ -135,7 +132,6 @@ marigold(void *p, unsigned long arg)
 
 	threads_sleep++;
 	cv_wait(threads_cv, threads_lk);
-
 	kprintf("Marigold thread done\n");
 	threads_left--;
 
@@ -178,10 +174,10 @@ flowerkiller(void *p, unsigned long arg)
 			}
 
 			int old_stake = ropes[next].rp_stake;
-			int new_stake = random() % NROPES + 1;
+			int new_stake = random() % NROPES;
 			/* Flowerkiller shouldn't switch a rope to the same stake. */
  			while (new_stake == old_stake){
-				new_stake = random() % NROPES + 1;
+				new_stake = random() % NROPES;
 			}
 			ropes[next].rp_stake = new_stake;
 
@@ -244,7 +240,6 @@ balloon(void *p, unsigned long arg)
 int
 airballoon(int nargs, char **args)
 {
-
 	(void)nargs;
 	(void)args;
 
@@ -256,8 +251,8 @@ airballoon(int nargs, char **args)
 
 	for (int i = 0; i < NROPES; i++){
 		ropes[i].rp_lock = lock_create("");
-		ropes[i].rp_stake = i + 1;
-		ropes[i].rp_hook = i + 1;
+		ropes[i].rp_stake = i;
+		ropes[i].rp_hook = i;
 		ropes[i].rp_cut = false;
 	}
 

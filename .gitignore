@@ -1,4 +1,5 @@
 build/*
+defs.mk
 kern/build
 kern/compile/*
 /kern/cscope.*

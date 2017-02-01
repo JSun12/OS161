@@ -1,3 +1,4 @@
 build/*
 kern/build
 kern/compile/*
+/kern/cscope.*

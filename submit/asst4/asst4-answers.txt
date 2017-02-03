@@ -1,0 +1,90 @@
+1. 
+
+The ELF magic numbers are the first few values of the e_ident array in the elf file header, namely '\177', 'E', 'L', 'F'. These magic numbers are used to indicate the file format for anyone accessing them.
+
+
+2. 
+
+UIO_USERISPACE is a flag set to indicate that memory transfer occurs between the kernel and a iovec pointing to locations in the userspace. UIO_SYSSPACE is a flag indicating that the iovec points to memory in the kernelspace. One should use the correct flag when wishing to transfer data between the userspace or the kernelspace.
+
+* Add something about ELF
+
+3. 
+
+The memory read goes to vaddr, which is located on the heap. Thus, it does not matter that the uio is defined on the stack, since it a mechanism for transfering data, and not the final data location itself.
+
+* UIO is a static size, so it can go on the stack?
+
+
+4. 
+
+By the time runprogram() calls vfs_close(), it has already loaded the ELF file into new address space (which is the new current address space). At this point, there is no more need for the file to remain open, and it is okay to free the file. This is best practice, since not closing the file can waste system resources.
+
+
+5.
+
+The function enter_new_process forces the processor to switch into user mode. It is machine dependent in that it requires assembly code, which is naturally machine dependent.
+
+
+6. 
+
+-memmove defined in common/libc/string/memmove.c
+-copyin and copyout defined in kern/vm/copyinout.c
+
+copyin and copyout have more complicated implementations than memmove because they are copying memory between the kernelspace to the userspace, so they must ensure that userspace memory being copied from/to falls within the userspace and doesn't overlap with the kernel space
+
+* Doesn’t crash kernel? Error checking capabilities.
+
+7. 
+
+userptr_t is a pointer, which points to one byte. It is used to point to blocks of memory in the user space (for example, if we desire to transfer a block of memory from user space to kernel space, we would have a userptr_t that points to the first byte of the block, and have an integer type indicating the size of the whole memory block to be transfered).
+
+
+8. 
+
+The numerical value of the exception code for a system call is EX_SYS 8. 
+
+
+9. 
+
+An instruction is 32 bits, as evidenced by how the epc register is incremented by 4 bytes (32 bits) to skip over the syscall instruction (after having executed the syscall, before restoring the registers of the thread that made the system call).
+
+
+10. 
+
+kill_curthread does not need to throw a kernel panic for a user code failure. If user code fails, the kernel is allowed to kill it without panic in all situations.
+
+* Currently, kill_curthread() doesn't handle the errors, nor does it kill the thread. Those feature must be implemented for the function to run as promised. 
+
+
+11. 
+
+Additional arguments can be placed on the userstack, which the kernel can access through the user's stack pointer, which is available in the trapframe. The starting address of these extra arguments is sp+16, which the kernel can fetched using copyin().
+
+
+12. 
+
+The shell script gensyscalls.sh uses the SYSCALL macro to generate assembly for each syscall into syscalls.h. The generated assembly for each syscall loads the syscall’s syscall number into the correct register before calling the __syscall function.
+
+
+13. 
+
+
+
+
+14. 
+
+The file handle should be in register a0, whence in a1, and offset in a2/a3. Returning from the syscall, the return should be in registers v0/v1.
+
+
+15. 
+
+-vfs_open() is used by the kernel to open a file
+-vnode is used to represent an open file
+-VOP_READ is used to read a file
+-VOP_WRITE is used to write to a file
+
+
+16. 
+
+A vnode keeps track of all the references there are of it. The VOP_INCREF and VOP_DECREF macros are used to increase and decrease the reference count by one respectively. When the count reaches 0 the vnode is cleaned up. 

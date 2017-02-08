@@ -55,20 +55,21 @@ struct ft {
 struct ft_entry {
     struct lock *entry_lock;
     struct vnode *file;
-    off_t offset; 
+    off_t offset;
 };
 
 // Functions
 struct ft *ft_create(void);
 void ft_destroy(struct ft *);
 int add_entry(struct ft*, struct ft_entry *);
+int remove_entry(struct ft ft, int position);
 
 struct ft_entry *entry_create(struct vnode *);
-void entry_destroy(struct ft_entry *);
+void entry_destroy(struct ft *ft, struct ft_entry *);
 
 
-int open(const char *, int);
-
+int open(const char *filename, int flags);
+int close(int fd);
 
 
 struct addrspace;

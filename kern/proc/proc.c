@@ -117,6 +117,8 @@ remove_entry(struct ft *ft, int pos)
 
     lock_acquire(ft->ft_lock);
 
+    vfs_close(ft->entries[pos]->file);
+
     entry_destroy(ft->entries[pos]);
     ft->entries[pos] = NULL;
     ft->used[pos] = 0;
@@ -154,7 +156,7 @@ entry_destroy(struct ft_entry *entry)
 
 
 int
-open(const char *filename, int flags)
+sys_open(const char *filename, int flags)
 {
     struct vnode *new;
     int ret;
@@ -175,10 +177,11 @@ open(const char *filename, int flags)
 }
 
 /*
-  Atmoic removal of an entry from the filetable
+  Atomic removal of an entry from the filetable.
+  Vfs file is also properly closed.
 */
 int
-close(int fd)
+sys_close(int fd)
 {
     return remove_entry(curproc->proc_ft, fd);
 }

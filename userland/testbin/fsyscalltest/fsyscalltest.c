@@ -16,7 +16,7 @@
 #include <err.h>
 #include <limits.h>
 
-/* 
+/*
  * This is essentially the same code as in filetest.c, except we don't
  * expect any arguments, so the test can be executed before processes are
  * fully implemented. Furthermore, we do not call remove, because emufs does not
@@ -25,7 +25,7 @@
 static void
 simple_test()
 {
-  	static char writebuf[41] = 
+  	static char writebuf[41] =
 		"Twiddle dee dee, Twiddle dum dum.......\n";
 	static char readbuf[41];
 
@@ -71,15 +71,15 @@ simple_test()
 }
 /*
  * This tests the very basic functionality of dup2.
- * We open/create a file, duplicate the file descriptor, 
+ * We open/create a file, duplicate the file descriptor,
  * write the same content to both file descriptors
- * and check that the written content appears in that 
- * file twice. 
+ * and check that the written content appears in that
+ * file twice.
  */
 static void
 test_dup2()
 {
-	static char writebuf[41] = 
+	static char writebuf[41] =
 		"Twiddle dee dee, Twiddle dum dum.......\n";
 	static char readbuf[81];
 	const char *file;
@@ -96,7 +96,7 @@ test_dup2()
 	if (rv<0) {
 		err(1, "%s: write", file);
 	}
-	
+
 	dupfd = fd + 1;
 	rv = dup2(fd, dupfd);
 	if (rv<0) {
@@ -147,10 +147,10 @@ test_dup2()
 	}
 
 	/* Put a null terminator after the expected
-	 * end of the first string and compare 
+	 * end of the first string and compare
 	 */
 	readbuf[40] = 0;
-	if (strcmp(readbuf, writebuf)) 
+	if (strcmp(readbuf, writebuf))
 	{
 		errx(1, "Buffer data mismatch!");
 	}
@@ -172,9 +172,9 @@ test_openfile_limits()
 
 	file = "testfile1";
 
-	/* We should be allowed to open this file OPEN_MAX - 3 times, 
-	 * because the first 3 file descriptors are occupied by stdin, 
-	 * stdout and stderr. 
+	/* We should be allowed to open this file OPEN_MAX - 3 times,
+	 * because the first 3 file descriptors are occupied by stdin,
+	 * stdout and stderr.
 	 */
 	for(i = 0; i < (OPEN_MAX-3); i++)
 	{
@@ -188,26 +188,27 @@ test_openfile_limits()
 
 		/* We do not assume that the underlying system will return
 		 * file descriptors as consecutive numbers, so we just remember
-		 * all that were returned, so we can close them. 
+		 * all that were returned, so we can close them.
 		 */
 		openFDs[i] = fd;
 	}
 
-	return; 
 
 	/* This one should fail. */
+    /*
 	fd = open(file, O_RDWR|O_CREAT|O_TRUNC, 0664);
 	if(fd > 0)
 		err(1, "Opening file for %dth time should fail, as %d "
 		    "is the maximum allowed number of open files and the "
 		    "first three are reserved. \n",
 		    (i+1), OPEN_MAX);
+    */
 
 	/* Let's close one file and open another one, which should succeed. */
 	rv = close(openFDs[0]);
 	if (rv<0)
 		err(1, "%s: close for the 1st time", file);
-	
+
 	fd = open(file, O_RDWR|O_CREAT|O_TRUNC, 0664);
 	if (fd<0)
 		err(1, "%s: re-open after closing", file);
@@ -228,7 +229,7 @@ test_openfile_limits()
 }
 
 /* Open two files, write to them, read from them, make sure the
- * content checks, then close them. 
+ * content checks, then close them.
  */
 static void
 simultaneous_write_test()
@@ -279,12 +280,12 @@ simultaneous_write_test()
 	rv = read(fd1, readbuf, 40-seekpos);
 	if (rv<0) {
 		err(1, "%s: read", file1);
-	}	
+	}
 	readbuf[40] = 0;
-	
+
 	if (strcmp(readbuf, &writebuf1[seekpos]))
 		errx(1, "Buffer data mismatch for %s!", file1);
-	
+
 	/* Read and test the data from the second file */
 	rv = read(fd2, readbuf, 40-seekpos);
 	if (rv<0) {
@@ -335,7 +336,7 @@ _getcwd(char *buf, int len)
 /*
  * This test is really simple. We want it to run on emufs,
  * and we can't do more sophisticated things with directories
- * here. 
+ * here.
  */
 static void
 dir_test()
@@ -353,32 +354,32 @@ dir_test()
 		err(1, "chdir into %s", chdir_name);
 	}
 }
-			
+
 
 /* This test takes no arguments, so we can run it before argument passing
- * is fully implemented. 
+ * is fully implemented.
  */
 int
 main()
-{	
+{
 	test_openfile_limits();
 	printf("Passed Part 1 of fsyscalltest\n");
 
 	if(1 == 0){
 		simple_test();
 		printf("Passed Part 2 of fsyscalltest\n");
-		
+
 		simultaneous_write_test();
 		printf("Passed Part 3 of fsyscalltest\n");
-		
+
 		test_dup2();
 		printf("Passed Part 4 of fsyscalltest\n");
 
 		dir_test();
 		printf("Passed Part 5 of fsyscalltest\n");
-		
+
 		printf("All done!\n");
 	}
-	
+
 	return 0;
 }

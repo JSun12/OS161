@@ -62,14 +62,14 @@ struct ft_entry {
 struct ft *ft_create(void);
 void ft_destroy(struct ft *);
 int add_entry(struct ft*, struct ft_entry *);
-int remove_entry(struct ft ft, int position);
+int remove_entry(struct ft *ft, int position);
 
 struct ft_entry *entry_create(struct vnode *);
-void entry_destroy(struct ft *ft, struct ft_entry *);
+void entry_destroy(struct ft_entry *);
 
-
-int open(const char *filename, int flags);
-int close(int fd);
+// These syscalls belong in syscall.h
+int sys_open(const char *filename, int flags);
+int sys_close(int fd);
 
 
 struct addrspace;

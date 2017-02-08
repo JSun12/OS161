@@ -38,6 +38,38 @@
 
 #include <spinlock.h>
 #include <thread.h> /* required for struct threadarray */
+#include <synch.h>
+#include <limits.h>
+#include <vnode.h>
+#include <lib.h>
+
+
+// File descriptor table
+struct ft {
+    struct lock *ft_lock;
+    struct ft_entry *entries[OPEN_MAX];
+    int used[OPEN_MAX];
+};
+
+// Entry of a file table
+struct ft_entry {
+    struct lock *entry_lock;
+    struct vnode *file;
+    off_t offset; 
+};
+
+// Functions
+struct ft *ft_create(void);
+void ft_destroy(struct ft *);
+int add_entry(struct ft*, struct ft_entry *);
+
+struct ft_entry *entry_create(struct vnode *);
+void entry_destroy(struct ft_entry *);
+
+
+int open(const char *, int);
+
+
 
 struct addrspace;
 struct vnode;
@@ -56,7 +88,7 @@ struct proc {
 	/* VFS */
 	struct vnode *p_cwd;		/* current working directory */
 
-	/* add more material here as needed */
+	struct ft *proc_ft;
 };
 
 /* This is the process structure for the kernel and for kernel-only threads. */

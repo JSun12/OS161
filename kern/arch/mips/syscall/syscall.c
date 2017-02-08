@@ -35,6 +35,7 @@
 #include <thread.h>
 #include <current.h>
 #include <syscall.h>
+#include <proc.h>
 
 
 /*
@@ -109,7 +110,10 @@ syscall(struct trapframe *tf)
 				 (userptr_t)tf->tf_a1);
 		break;
 
-	    /* Add stuff here */
+		case SYS_open:
+		retval = open((const char *) tf->tf_a0, (int) tf->tf_a1);
+
+		break;
 
 	    default:
 		kprintf("Unknown syscall %d\n", callno);

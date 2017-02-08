@@ -48,11 +48,104 @@
 #include <current.h>
 #include <addrspace.h>
 #include <vnode.h>
+#include <vfs.h>
 
 /*
  * The process for the kernel; this holds all the kernel-only threads.
  */
 struct proc *kproc;
+
+
+struct ft *
+ft_create()
+{
+    struct ft *ft; 
+
+    ft = kmalloc(sizeof(struct ft));
+    ft->ft_lock = lock_create("fs_lock");
+    
+    return ft;
+}
+
+void
+ft_destroy(struct ft *ft)
+{
+    lock_destroy(ft->ft_lock);
+    kfree(ft);
+}
+
+/*
+Returns a negative value if OPEN_MAX files are
+already open. Otherwise, returns the index which 
+a file has been saved in the file table, which 
+is the file descriptor.
+*/
+int
+add_entry(struct ft *ft, struct ft_entry *entry)
+{
+    int i; 
+    
+    lock_acquire(ft->ft_lock);
+
+    for(i = 3; i < OPEN_MAX; i++){
+        if(!ft->used[i]){
+            ft->used[i] = 1; 
+            ft->entries[i] = entry;
+            lock_release(ft->ft_lock);
+			kprintf("%d\n", i);
+            return i;
+        }
+    }
+    
+    lock_release(ft->ft_lock);
+
+    return -1; 
+}
+
+struct ft_entry *
+entry_create(struct vnode *vnode)
+{
+    struct ft_entry *entry;
+
+    entry = kmalloc(sizeof(struct ft_entry));
+    entry->entry_lock = lock_create("entry_lock");
+    entry->file = vnode;
+    entry->offset = 0; 
+
+    return entry;
+}
+
+void 
+entry_destroy(struct ft_entry *entry)
+{
+    lock_destroy(entry->entry_lock);
+    kfree(entry);
+}
+
+
+
+int
+open(const char *filename, int flags)
+{
+    struct vnode *new;
+    int ret; 
+
+	ret = vfs_open((char *)filename, flags, 0, &new);
+    if(ret){
+        return -1;
+    }
+
+    struct ft_entry *entry = entry_create(new);
+    ret = add_entry(curproc->proc_ft, entry);
+    if(ret == -1){
+        return ret;
+    }
+
+    return ret;
+    
+}
+
+
 
 /*
  * Create a proc structure.
@@ -82,8 +175,12 @@ proc_create(const char *name)
 	/* VFS fields */
 	proc->p_cwd = NULL;
 
+	proc->proc_ft = ft_create();
+
 	return proc;
 }
+
+
 
 /*
  * Destroy a proc structure.
@@ -164,6 +261,8 @@ proc_destroy(struct proc *proc)
 		}
 		as_destroy(as);
 	}
+
+	ft_destroy(proc->proc_ft);
 
 	threadarray_cleanup(&proc->p_threads);
 	spinlock_cleanup(&proc->p_lock);

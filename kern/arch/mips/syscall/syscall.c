@@ -35,7 +35,7 @@
 #include <thread.h>
 #include <current.h>
 #include <syscall.h>
-#include <proc.h>
+#include <fsyscall.h>
 
 
 /*

@@ -3,3 +3,5 @@ defs.mk
 kern/build
 kern/compile/*
 /kern/cscope.*
+userland/cscope.*
+**/build

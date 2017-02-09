@@ -82,6 +82,8 @@ syscall(struct trapframe *tf)
 {
 	int callno;
 	int32_t retval;
+	// int64_t retval64;
+	// bool use64 = false; 
 	int err;
 
 	int whence; 
@@ -103,6 +105,7 @@ syscall(struct trapframe *tf)
 	 */
 
 	retval = 0;
+	// retval64 = 0; 
 
 	switch (callno) {
 	    case SYS_reboot:
@@ -134,10 +137,9 @@ syscall(struct trapframe *tf)
 		case SYS_lseek: 
 		copyin((const_userptr_t) tf->tf_sp + 16, &whence, sizeof(int)); 
 		off_t *seek = (off_t *) &tf->tf_a2;
+		// in my approach, below should be retval64
 		retval = sys_lseek((int)tf->tf_a0, *seek, whence);
 		err = 0; 
-		kprintf("was here\n");
-		kprintf("%d\n", retval);
 		break;
 
 	    default:
@@ -158,8 +160,15 @@ syscall(struct trapframe *tf)
 	}
 	else {
 		/* Success. */
-		tf->tf_v0 = retval;
+		// if(!use64){
+			tf->tf_v0 = retval;
+		// }  
+		// else {
+		// 	int64_t *v01 = (int64_t *) &tf->tf_v0;
+		// 	*v01 = retval64; 
+		// }
 		tf->tf_a3 = 0;      /* signal no error */
+		
 	}
 
 	/*

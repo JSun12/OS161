@@ -128,9 +128,9 @@ off_t
 sys_lseek(int fd, off_t pos, int whence)
 {
 
-	kprintf("%d\n", fd);
-	kprintf("%ld\n", (long) pos);
-	kprintf("%d\n", whence);
+	// kprintf("%d\n", fd);
+	// kprintf("%ld\n", (long) pos);
+	// kprintf("%d\n", whence);
 	//XXX: Lock this
 
 	struct ft *ft = curproc->proc_ft;

@@ -363,10 +363,10 @@ main()
 	test_openfile_limits();
 	printf("Passed Part 1 of fsyscalltest\n");
 
-	if(1 == 0){
-		simple_test();
-		printf("Passed Part 2 of fsyscalltest\n");
+    simple_test();
+    printf("Passed Part 2 of fsyscalltest\n");
 
+	if(1 == 0){
 		simultaneous_write_test();
 		printf("Passed Part 3 of fsyscalltest\n");
 

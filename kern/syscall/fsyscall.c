@@ -4,6 +4,8 @@
 #include <fsyscall.h>
 #include <filetable.h>
 #include <proc.h>
+#include <uio.h>
+#include <vnode.h>
 
 
 int
@@ -35,4 +37,34 @@ int
 sys_close(int fd)
 {
     return remove_entry(curproc->proc_ft, fd);
+}
+
+/*
+write writes up to buflen bytes to the file specified by fd, at the location in the file specified by the current seek position of the file, taking the data from the space pointed to by buf. The file must be open for writing.
+*/
+ssize_t
+sys_write(int fd, const void *buf, size_t nbytes)
+{
+    //XXX: Lock this
+
+    struct iovec iov;
+	struct uio u;
+	int result;
+    struct ft_entry *entry = curproc->proc_ft->entries[fd];
+
+	iov.iov_ubase = (userptr_t)buf;
+	iov.iov_len = nbytes;		 // length of the memory space
+	u.uio_iov = &iov;
+	u.uio_iovcnt = 1;
+	u.uio_resid = nbytes;          // amount to read from the file -> Amount left to transfer
+	u.uio_offset = 0;//entry->offset;
+	u.uio_segflg = UIO_USERSPACE;
+	u.uio_rw = UIO_WRITE;
+	u.uio_space = curproc->p_addrspace;
+
+	result = VOP_WRITE(entry->file, &u);
+	if (result) {
+		return result;
+	}
+    return 0;
 }

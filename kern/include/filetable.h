@@ -21,6 +21,7 @@ struct ft_entry {
     struct lock *entry_lock;
     struct vnode *file;
     off_t offset;
+    const char* path; 
 };
 
 // Functions

@@ -1,6 +1,9 @@
 #include <types.h>
+#include <lib.h>
 #include <vfs.h>
 #include <filetable.h>
+#include <kern/fcntl.h>
+#include <fsyscall.h>
 
 
 struct ft *
@@ -31,6 +34,41 @@ int
 add_entry(struct ft *ft, struct ft_entry *entry)
 {
     lock_acquire(ft->ft_lock);
+
+    const char * cons = "con:";  // Filepath of console
+
+    if (ft->used[0] == 0){
+        struct vnode *stdin_v;
+        int ret;
+
+    	ret = vfs_open(kstrdup(cons), O_RDONLY, 0, &stdin_v);  //XXX: Check the return value
+        ft->entries[0] = entry_create(stdin_v);
+        ft->used[0] = 1;
+        (void) ret;
+        kprintf("STDIN opened\n");
+    }
+
+    if (ft->used[1] == 0){
+        struct vnode *stdout_v;
+        int ret;
+
+    	ret = vfs_open(kstrdup(cons), O_WRONLY, 0, &stdout_v);  //XXX: Check the return value
+        ft->entries[1] = entry_create(stdout_v);
+        ft->used[1] = 1;
+        (void) ret;
+        kprintf("STDOUT opened\n");
+    }
+
+    if (ft->used[2] == 0){
+        struct vnode *stderr_v;
+        int ret;
+
+    	ret = vfs_open(kstrdup(cons), O_WRONLY, 0, &stderr_v);  //XXX: Check the return value
+        ft->entries[2] = entry_create(stderr_v);
+        ft->used[2] = 1;
+        (void) ret;
+        kprintf("STDERR opened\n");
+    }
 
     for(int i = 3; i < OPEN_MAX; i++){
         if(!ft->used[i]){
@@ -91,7 +129,7 @@ entry_create(struct vnode *vnode)
 }
 
 
-
+// This will also VFS close the file.``
 void
 entry_destroy(struct ft_entry *entry)
 {

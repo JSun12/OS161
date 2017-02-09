@@ -195,14 +195,12 @@ test_openfile_limits()
 
 
 	/* This one should fail. */
-    /*
 	fd = open(file, O_RDWR|O_CREAT|O_TRUNC, 0664);
 	if(fd > 0)
 		err(1, "Opening file for %dth time should fail, as %d "
 		    "is the maximum allowed number of open files and the "
 		    "first three are reserved. \n",
 		    (i+1), OPEN_MAX);
-    */
 
 	/* Let's close one file and open another one, which should succeed. */
 	rv = close(openFDs[0]);

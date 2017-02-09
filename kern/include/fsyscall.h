@@ -7,5 +7,6 @@
 
 int sys_open(const char *, int);
 int sys_close(int);
+ssize_t sys_write(int fd, const void *buf, size_t nbytes);
 
 #endif

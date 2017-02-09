@@ -75,7 +75,6 @@ add_entry(struct ft *ft, struct ft_entry *entry)
             ft->used[i] = 1;
             ft->entries[i] = entry;
             lock_release(ft->ft_lock);
-			kprintf("Open %d\n", i);
             return i;
         }
     }
@@ -83,6 +82,12 @@ add_entry(struct ft *ft, struct ft_entry *entry)
     lock_release(ft->ft_lock);
 
     return -1;
+}
+
+bool 
+fd_used(struct ft *ft, int fd)
+{
+    return (ft->used[fd] == 1);
 }
 
 /*
@@ -107,7 +112,6 @@ remove_entry(struct ft *ft, int pos)
     entry_destroy(ft->entries[pos]);
     ft->entries[pos] = NULL;
     ft->used[pos] = 0;
-    kprintf("Close %d\n", pos);
 
     lock_release(ft->ft_lock);
 

@@ -28,13 +28,14 @@ struct ft_entry {
 struct ft *ft_create(void);
 void ft_destroy(struct ft *);
 int add_entry(struct ft*, struct ft_entry *);
-int remove_entry(struct ft *ft, int position);
+int remove_entry(struct ft *, int);
+bool fd_used(struct ft *, int);
 
 struct ft_entry *entry_create(struct vnode *);
 void entry_destroy(struct ft_entry *);
 
 // These syscalls belong in syscall.h
-int sys_open(const char *filename, int flags);
+int sys_open(const char *, int);
 int sys_close(int fd);
 
 

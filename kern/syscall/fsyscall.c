@@ -6,6 +6,11 @@
 #include <proc.h>
 #include <uio.h>
 #include <vnode.h>
+#include <kern/stat.h>
+
+
+// must make extern (use as errno for now)
+int errno;
 
 
 int
@@ -16,6 +21,7 @@ sys_open(const char *filename, int flags)
 
 	ret = vfs_open((char *)filename, flags, 0, &new);
     if(ret){
+		errno = ret; 
         return -1;
     }
 
@@ -24,6 +30,9 @@ sys_open(const char *filename, int flags)
     if (ret == -1){
         return ret;
     }
+
+	kprintf("Open: %d\n", ret);
+
 
     return ret;
 
@@ -36,11 +45,15 @@ sys_open(const char *filename, int flags)
 int
 sys_close(int fd)
 {
-    return remove_entry(curproc->proc_ft, fd);
+	int ret = remove_entry(curproc->proc_ft, fd);
+	kprintf("Close: %d\n", fd);
+	return ret;
 }
 
 /*
-write writes up to buflen bytes to the file specified by fd, at the location in the file specified by the current seek position of the file, taking the data from the space pointed to by buf. The file must be open for writing.
+write writes up to buflen bytes to the file specified by fd, at the 
+location in the file specified by the current seek position of the file, 
+taking the data from the space pointed to by buf. The file must be open for writing.
 */
 ssize_t
 sys_write(int fd, const void *buf, size_t nbytes)
@@ -66,10 +79,17 @@ sys_write(int fd, const void *buf, size_t nbytes)
 	if (result) {
 		return result;
 	}
+
+	entry->offset += nbytes - u.uio_resid; //hopefully correct implementation
+	// kprintf("Current offset: %d\n", (int) entry->offset);
+
     return 0;
 }
 /*
-read reads up to buflen bytes from the file specified by fd, at the location in the file specified by the current seek position of the file, and stores them in the space pointed to by buf. The file must be open for reading.
+read reads up to buflen bytes from the file specified by fd,
+at the location in the file specified by the current seek position
+of the file, and stores them in the space pointed to by buf.
+The file must be open for reading.
 
 The current seek position of the file is advanced by the number of bytes read.
 */
@@ -97,5 +117,47 @@ sys_read(int fd, void *buf, size_t buflen)
 	if (result) {
 		return result;
 	}
+
+	entry->offset += buflen - u.uio_resid; //hopefully correct implementation
+	// kprintf("Current offset: %d\n", (int) entry->offset);
+
     return 0;
 }
+
+off_t 
+sys_lseek(int fd, off_t pos, int whence)
+{
+
+	kprintf("%d\n", fd);
+	kprintf("%ld\n", (long) pos);
+	kprintf("%d\n", whence);
+	//XXX: Lock this
+
+	struct ft *ft = curproc->proc_ft;
+	struct ft_entry *entry; 
+	struct stat *stat; 
+	off_t eof; 
+
+	stat = kmalloc(sizeof(struct stat));
+
+	entry = ft->entries[fd];
+
+	VOP_STAT(entry->file, stat);
+	eof = stat->st_size;
+
+	switch (whence) {
+		case SEEK_SET: 
+		entry->offset = pos; 
+		break;
+		case SEEK_CUR:
+		entry->offset += pos; 
+		break;
+		case SEEK_END:
+		entry->offset = eof + pos;
+		break;	
+	}
+
+	return entry->offset;
+}
+
+

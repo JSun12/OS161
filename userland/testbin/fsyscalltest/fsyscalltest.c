@@ -366,7 +366,7 @@ main()
 
     simple_test();
     printf("Passed Part 2 of fsyscalltest\n");
-	
+
 	simultaneous_write_test();
 	printf("Passed Part 3 of fsyscalltest\n");
 

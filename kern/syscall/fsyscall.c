@@ -45,7 +45,7 @@ sys_open(const char *filename, int flags)
 int
 sys_close(int fd)
 {
-	int ret = remove_entry(curproc->proc_ft, fd);
+	int ret = free_fd(curproc->proc_ft, fd);
 	kprintf("Close: %d\n", fd);
 	return ret;
 }
@@ -70,7 +70,7 @@ sys_write(int fd, const void *buf, size_t nbytes)
 	u.uio_iov = &iov;
 	u.uio_iovcnt = 1;
 	u.uio_resid = nbytes;          // amount to write from the file -> Amount left to transfer
-	u.uio_offset = 0;//entry->offset;
+	u.uio_offset = entry->offset;
 	u.uio_segflg = UIO_USERSPACE;
 	u.uio_rw = UIO_WRITE;
 	u.uio_space = curproc->p_addrspace;
@@ -82,6 +82,13 @@ sys_write(int fd, const void *buf, size_t nbytes)
 
 	entry->offset += nbytes - u.uio_resid; //hopefully correct implementation
 	// kprintf("Current offset: %d\n", (int) entry->offset);
+
+	// struct stat *stat; 
+	// off_t eof; 
+	// stat = kmalloc(sizeof(struct stat));
+	// VOP_STAT(entry->file, stat);
+	// eof = stat->st_size;
+	// kprintf("eof: %d\n", (int) eof);
 
     return 0;
 }
@@ -120,6 +127,14 @@ sys_read(int fd, void *buf, size_t buflen)
 
 	entry->offset += buflen - u.uio_resid; //hopefully correct implementation
 	// kprintf("Current offset: %d\n", (int) entry->offset);
+	
+	
+	// struct stat *stat; 
+	// off_t eof; 
+	// stat = kmalloc(sizeof(struct stat));
+	// VOP_STAT(entry->file, stat);
+	// eof = stat->st_size;
+	// kprintf("eof: %d\n", (int) eof);
 
     return 0;
 }
@@ -160,4 +175,17 @@ sys_lseek(int fd, off_t pos, int whence)
 	return entry->offset;
 }
 
+int
+sys_dup2(int oldfd, int newfd)
+{
+	struct ft *ft = curproc->proc_ft;
+	struct ft_entry *entry = ft->entries[oldfd];
+
+	if(used(ft, newfd)){
+		free_fd(ft, newfd);
+	}
+
+	assign_fd(ft, entry, newfd);
+	return newfd;
+}
 

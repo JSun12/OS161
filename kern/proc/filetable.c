@@ -75,9 +75,7 @@ add_entry(struct ft *ft, struct ft_entry *entry)
 
     for(int i = 3; i < OPEN_MAX; i++){
         if(!ft->used[i]){
-            ft->entries[i] = entry;
-            ft->used[i] = 1;
-            entry_incref(ft->entries[i]);
+            assign_fd(ft, entry, i);
             lock_release(ft->ft_lock);
             return i;
         }
@@ -88,33 +86,47 @@ add_entry(struct ft *ft, struct ft_entry *entry)
     return -1;
 }
 
+void
+assign_fd(struct ft *ft, struct ft_entry *entry, int fd)
+{   
+    ft->entries[fd] = entry;
+    ft->used[fd] = 1; 
+    entry_incref(entry);
+}
+
 /*
 Removes an entry at the specified location in the filetable.
 Will return 0 for success, -1 for failure
 */
 int
-remove_entry(struct ft *ft, int pos)
+free_fd(struct ft *ft, int fd)
 {
     /* Out of bounds */
-    if (pos >= OPEN_MAX || pos < 0)
+    if (fd >= OPEN_MAX || fd < 0)
         return -1;
 
     /* Unused position */
-    if (ft->used[pos] == 0){
+    if (ft->used[fd] == 0){
         return -1;
     }
 
     lock_acquire(ft->ft_lock);    
 
-    struct ft_entry *entry = ft->entries[pos];
+    struct ft_entry *entry = ft->entries[fd];
 
     entry_decref(entry);
-    ft->entries[pos] = NULL;
-    ft->used[pos] = 0;
+    ft->entries[fd] = NULL;
+    ft->used[fd] = 0;
 
     lock_release(ft->ft_lock);
 
     return 0;
+}
+
+bool
+used(struct ft *ft, int fd)
+{
+    return ft->used[fd] == 1;
 }
 
 

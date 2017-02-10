@@ -28,8 +28,11 @@ struct ft_entry {
 // Functions
 struct ft *ft_create(void);
 void ft_destroy(struct ft *);
+
 int add_entry(struct ft*, struct ft_entry *);
-int remove_entry(struct ft *, int);
+void assign_fd(struct ft *, struct ft_entry *, int);
+int free_fd(struct ft *, int);
+bool used(struct ft *, int);
 
 struct ft_entry *entry_create(struct vnode *);
 void entry_destroy(struct ft_entry *);

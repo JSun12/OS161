@@ -25,14 +25,7 @@ sys_open(const char *filename, int flags)
 	if (!(flags & O_CREAT)){
 		result = vfs_lookup(path, &new);
 		if (result){
-			errno = ENOENT;
-			return -1;
-		}
-	} 
-	else if (flags & O_EXCL) {
-		result = vfs_lookup(path, &new);
-		if (result != 0){
-			errno = EEXIST;
+			errno = result;
 			return -1;
 		}
 	} 
@@ -51,8 +44,16 @@ sys_open(const char *filename, int flags)
 		return -1;
     }
 
-	// kprintf("Open: %d\n", result);
+	if (flags & O_APPEND) {
+		struct stat *stat; 
+		off_t eof; 
+		stat = kmalloc(sizeof(struct stat));
+		VOP_STAT(entry->file, stat);
+		eof = stat->st_size;
+		entry->offset = eof;		
+	}
 
+	// kprintf("Open: %d\n", result);
 
     return result;
 
@@ -65,9 +66,13 @@ sys_open(const char *filename, int flags)
 int
 sys_close(int fd)
 {
-	int ret = free_fd(curproc->proc_ft, fd);
-	kprintf("Close: %d\n", fd);
-	return ret;
+	int result = free_fd(curproc->proc_ft, fd);
+	if (result == -1) {
+		errno = EBADF;
+		return -1;
+	}
+	// kprintf("Close: %d\n", fd);
+	return 0;
 }
 
 /*
@@ -79,6 +84,11 @@ ssize_t
 sys_write(int fd, const void *buf, size_t nbytes)
 {
     //XXX: Lock this
+
+	if (!fd_valid_and_used(curproc->proc_ft, fd)) {
+		errno = EBADF;
+		return -1;
+	}
 
     struct iovec iov;
 	struct uio u;
@@ -97,7 +107,8 @@ sys_write(int fd, const void *buf, size_t nbytes)
 
 	result = VOP_WRITE(entry->file, &u);
 	if (result) {
-		return result;
+		errno = result;
+		return -1;
 	}
 
 	entry->offset += nbytes - u.uio_resid; //hopefully correct implementation
@@ -125,6 +136,12 @@ sys_read(int fd, void *buf, size_t buflen)
 {
     //XXX: Lock this
 
+	if (!fd_valid_and_used(curproc->proc_ft, fd)) {
+		errno = EBADF;
+		return -1;
+	}
+
+
     struct iovec iov;
 	struct uio u;
 	int result;
@@ -142,7 +159,8 @@ sys_read(int fd, void *buf, size_t buflen)
 
 	result = VOP_READ(entry->file, &u);
 	if (result) {
-		return result;
+		errno = result;
+		return -1;
 	}
 
 	entry->offset += buflen - u.uio_resid; //hopefully correct implementation
@@ -201,7 +219,17 @@ sys_dup2(int oldfd, int newfd)
 	struct ft *ft = curproc->proc_ft;
 	struct ft_entry *entry = ft->entries[oldfd];
 
-	if(fd_used(ft, newfd)){
+	if (!fd_valid_and_used(ft, oldfd)){
+		errno = EBADF;
+		return -1;
+	}
+
+	if (newfd < 0 || newfd > OPEN_MAX) {
+		errno = EBADF;
+		return -1;
+	}
+
+	if (fd_valid_and_used(ft, newfd)){
 		free_fd(ft, newfd);
 	}
 
@@ -212,7 +240,12 @@ sys_dup2(int oldfd, int newfd)
 int
 sys_chdir(const char *pathname)
 {
-	return vfs_chdir((char *) pathname);
+	int result = vfs_chdir((char *) pathname);
+	if (result) {
+		errno = result;
+		return -1;
+	}
+	return 0; 
 }
 
 int 
@@ -232,7 +265,11 @@ sys___getcwd(char *buf, size_t buflen)
 	u.uio_rw = UIO_READ;
 	u.uio_space = curproc->p_addrspace;
 
-	vfs_getcwd(&u);
+	result = vfs_getcwd(&u);
+	if (result) {
+		errno = result;
+		return -1;
+	}
 	result = buflen - u.uio_resid;
 	return result;
 }

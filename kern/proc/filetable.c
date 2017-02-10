@@ -109,12 +109,7 @@ Will return 0 for success, -1 for failure
 int
 free_fd(struct ft *ft, int fd)
 {
-    /* Out of bounds */
-    if (fd >= OPEN_MAX || fd < 0)
-        return -1;
-
-    /* Unused position */
-    if (ft->entries[fd] == NULL){
+    if(!fd_valid_and_used(ft, fd)){
         return -1;
     }
 
@@ -129,8 +124,11 @@ free_fd(struct ft *ft, int fd)
 }
 
 bool
-fd_used(struct ft *ft, int fd)
+fd_valid_and_used(struct ft *ft, int fd)
 {
+    if (fd < 0 || fd >= OPEN_MAX) {
+        return false;
+    }
     return ft->entries[fd] != NULL;
 }
 

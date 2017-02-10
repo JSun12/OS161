@@ -18,6 +18,7 @@ struct ft {
 
 // Entry of a file table
 struct ft_entry {
+    int count; 
     struct lock *entry_lock;
     struct vnode *file;
     off_t offset;
@@ -29,14 +30,18 @@ struct ft *ft_create(void);
 void ft_destroy(struct ft *);
 int add_entry(struct ft*, struct ft_entry *);
 int remove_entry(struct ft *, int);
-bool fd_used(struct ft *, int);
 
 struct ft_entry *entry_create(struct vnode *);
 void entry_destroy(struct ft_entry *);
 
-// These syscalls belong in syscall.h
-int sys_open(const char *, int);
-int sys_close(int fd);
+/*
+At any state of the file table, the entry->count 
+is the number of file descriptors it has. Once the 
+count reaches zero, the entry must be destroyed.
+*/
+
+void entry_incref(struct ft_entry *);
+void entry_decref(struct ft_entry *);
 
 
 struct addrspace;

@@ -367,13 +367,16 @@ main()
     simple_test();
     printf("Passed Part 2 of fsyscalltest\n");
 	
-	simultaneous_write_test();
-	printf("Passed Part 3 of fsyscalltest\n");
+	if(1 == 0){
+		simultaneous_write_test();
+		printf("Passed Part 3 of fsyscalltest\n");
+	}
+
+	
+	test_dup2();
+	printf("Passed Part 4 of fsyscalltest\n");
 
 	if(1 == 0){
-		test_dup2();
-		printf("Passed Part 4 of fsyscalltest\n");
-
 		dir_test();
 		printf("Passed Part 5 of fsyscalltest\n");
 

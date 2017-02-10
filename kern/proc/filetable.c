@@ -43,6 +43,7 @@ add_entry(struct ft *ft, struct ft_entry *entry)
 
     	ret = vfs_open(kstrdup(cons), O_RDONLY, 0, &stdin_v);  //XXX: Check the return value
         ft->entries[0] = entry_create(stdin_v);
+        entry_incref(ft->entries[0]);
         ft->used[0] = 1;
         (void) ret;
         kprintf("STDIN opened\n");
@@ -55,6 +56,7 @@ add_entry(struct ft *ft, struct ft_entry *entry)
     	ret = vfs_open(kstrdup(cons), O_WRONLY, 0, &stdout_v);  //XXX: Check the return value
         ft->entries[1] = entry_create(stdout_v);
         ft->used[1] = 1;
+        entry_incref(ft->entries[1]);
         (void) ret;
         kprintf("STDOUT opened\n");
     }
@@ -66,14 +68,16 @@ add_entry(struct ft *ft, struct ft_entry *entry)
     	ret = vfs_open(kstrdup(cons), O_WRONLY, 0, &stderr_v);  //XXX: Check the return value
         ft->entries[2] = entry_create(stderr_v);
         ft->used[2] = 1;
+        entry_incref(ft->entries[2]);
         (void) ret;
         kprintf("STDERR opened\n");
     }
 
     for(int i = 3; i < OPEN_MAX; i++){
         if(!ft->used[i]){
-            ft->used[i] = 1;
             ft->entries[i] = entry;
+            ft->used[i] = 1;
+            entry_incref(ft->entries[i]);
             lock_release(ft->ft_lock);
             return i;
         }
@@ -82,12 +86,6 @@ add_entry(struct ft *ft, struct ft_entry *entry)
     lock_release(ft->ft_lock);
 
     return -1;
-}
-
-bool 
-fd_used(struct ft *ft, int fd)
-{
-    return (ft->used[fd] == 1);
 }
 
 /*
@@ -102,14 +100,15 @@ remove_entry(struct ft *ft, int pos)
         return -1;
 
     /* Unused position */
-    if (ft->used[pos] == 0)
+    if (ft->used[pos] == 0){
         return -1;
+    }
 
-    lock_acquire(ft->ft_lock);
+    lock_acquire(ft->ft_lock);    
 
-    vfs_close(ft->entries[pos]->file);
+    struct ft_entry *entry = ft->entries[pos];
 
-    entry_destroy(ft->entries[pos]);
+    entry_decref(entry);
     ft->entries[pos] = NULL;
     ft->used[pos] = 0;
 
@@ -128,16 +127,30 @@ entry_create(struct vnode *vnode)
     entry->entry_lock = lock_create("entry_lock");
     entry->file = vnode;
     entry->offset = 0;
+    entry->count = 0; 
 
     return entry;
 }
 
 
-// This will also VFS close the file.``
+// This will also VFS close the file.
 void
 entry_destroy(struct ft_entry *entry)
 {
+    vfs_close(entry->file);    
     lock_destroy(entry->entry_lock);
-
     kfree(entry);
+}
+
+void
+entry_incref(struct ft_entry *entry){
+    entry->count += 1; 
+}
+
+void
+entry_decref(struct ft_entry *entry){    
+    entry->count -= 1; 
+    if (entry->count == 0){
+        entry_destroy(entry);
+    }
 }

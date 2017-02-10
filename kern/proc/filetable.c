@@ -25,15 +25,10 @@ ft_destroy(struct ft *ft)
 }
 
 /*
-Returns a negative value if OPEN_MAX files are
-already open. Otherwise, returns the index which
-a file has been saved in the file table, which
-is the file descriptor.
+Initializes the console of the filetable
 */
-int
-add_entry(struct ft *ft, struct ft_entry *entry)
-{
-    lock_acquire(ft->ft_lock);
+void
+ft_init_std(struct ft *ft){
 
     const char * cons = "con:";  // Filepath of console
 
@@ -41,7 +36,7 @@ add_entry(struct ft *ft, struct ft_entry *entry)
         struct vnode *stdin_v;
         int ret;
 
-    	ret = vfs_open(kstrdup(cons), O_RDONLY, 0, &stdin_v);  //XXX: Check the return value
+        ret = vfs_open(kstrdup(cons), O_RDONLY, 0, &stdin_v);  //XXX: Check the return value
         ft->entries[0] = entry_create(stdin_v);
         entry_incref(ft->entries[0]);
         ft->used[0] = 1;
@@ -53,7 +48,7 @@ add_entry(struct ft *ft, struct ft_entry *entry)
         struct vnode *stdout_v;
         int ret;
 
-    	ret = vfs_open(kstrdup(cons), O_WRONLY, 0, &stdout_v);  //XXX: Check the return value
+        ret = vfs_open(kstrdup(cons), O_WRONLY, 0, &stdout_v);  //XXX: Check the return value
         ft->entries[1] = entry_create(stdout_v);
         ft->used[1] = 1;
         entry_incref(ft->entries[1]);
@@ -65,13 +60,26 @@ add_entry(struct ft *ft, struct ft_entry *entry)
         struct vnode *stderr_v;
         int ret;
 
-    	ret = vfs_open(kstrdup(cons), O_WRONLY, 0, &stderr_v);  //XXX: Check the return value
+        ret = vfs_open(kstrdup(cons), O_WRONLY, 0, &stderr_v);  //XXX: Check the return value
         ft->entries[2] = entry_create(stderr_v);
         ft->used[2] = 1;
         entry_incref(ft->entries[2]);
         (void) ret;
         kprintf("STDERR opened\n");
     }
+
+}
+
+/*
+Returns a negative value if OPEN_MAX files are
+already open. Otherwise, returns the index which
+a file has been saved in the file table, which
+is the file descriptor.
+*/
+int
+add_entry(struct ft *ft, struct ft_entry *entry)
+{
+    lock_acquire(ft->ft_lock);
 
     for(int i = 3; i < OPEN_MAX; i++){
         if(!ft->used[i]){
@@ -93,6 +101,7 @@ assign_fd(struct ft *ft, struct ft_entry *entry, int fd)
     ft->used[fd] = 1; 
     entry_incref(entry);
 }
+
 
 /*
 Removes an entry at the specified location in the filetable.
@@ -124,7 +133,7 @@ free_fd(struct ft *ft, int fd)
 }
 
 bool
-used(struct ft *ft, int fd)
+fd_used(struct ft *ft, int fd)
 {
     return ft->used[fd] == 1;
 }

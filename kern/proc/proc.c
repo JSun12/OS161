@@ -226,6 +226,10 @@ proc_create_runprogram(const char *name)
 	}
 	spinlock_release(&curproc->p_lock);
 
+	/* Initialize console */
+
+	ft_init_std(newproc->proc_ft);
+
 	return newproc;
 }
 

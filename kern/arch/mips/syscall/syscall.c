@@ -82,7 +82,7 @@ syscall(struct trapframe *tf)
 {
 	int callno;
 	int32_t retval;
-	// int64_t retval64;
+	// int64_t retval64; 
 	// bool use64 = false; 
 	int err;
 

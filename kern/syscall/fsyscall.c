@@ -181,7 +181,7 @@ sys_dup2(int oldfd, int newfd)
 	struct ft *ft = curproc->proc_ft;
 	struct ft_entry *entry = ft->entries[oldfd];
 
-	if(used(ft, newfd)){
+	if(fd_used(ft, newfd)){
 		free_fd(ft, newfd);
 	}
 

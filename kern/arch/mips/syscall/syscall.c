@@ -174,13 +174,17 @@ syscall(struct trapframe *tf)
 	}
 	else {
 		/* Success. */
-		// if(!use64){
-			tf->tf_v0 = retval;
+		tf->tf_v0 = retval;
+
+		// if (use64) {}
+		// if (1) {
+
 		// }  
 		// else {
 		// 	int64_t *v01 = (int64_t *) &tf->tf_v0;
 		// 	*v01 = retval64; 
 		// }
+
 		tf->tf_a3 = 0;      /* signal no error */
 		
 	}

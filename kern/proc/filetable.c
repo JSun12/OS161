@@ -71,10 +71,9 @@ ft_init_std(struct ft *ft){
 }
 
 /*
-Returns a negative value if OPEN_MAX files are
-already open. Otherwise, returns the index which
-a file has been saved in the file table, which
-is the file descriptor.
+Returns a -1 if OPEN_MAX files are
+already open. Otherwise, returns new
+file descriptor.
 */
 int
 add_entry(struct ft *ft, struct ft_entry *entry)

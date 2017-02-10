@@ -7,6 +7,8 @@
 #include <uio.h>
 #include <vnode.h>
 #include <kern/stat.h>
+#include <kern/fcntl.h>
+#include <kern/errno.h>
 
 
 // must make extern (use as errno for now)
@@ -17,25 +19,42 @@ int
 sys_open(const char *filename, int flags)
 {
     struct vnode *new;
-    int ret;
+    int result;
+	char *path = (char *) kstrdup(filename);
 
-	//TODO: might be better to copy
-	ret = vfs_open((char *)filename, flags, 0, &new);
-    if(ret){
-		errno = ret; 
-        return -1;
-    }
+	if (!(flags & O_CREAT)){
+		result = vfs_lookup(path, &new);
+		if (result){
+			errno = ENOENT;
+			return -1;
+		}
+	} 
+	else if (flags & O_EXCL) {
+		result = vfs_lookup(path, &new);
+		if (result != 0){
+			errno = EEXIST;
+			return -1;
+		}
+	} 
+	else {
+		result = vfs_open(path, flags, 0, &new);
+		if (result){
+			errno = result;
+			return -1;
+		}
+	}
 
     struct ft_entry *entry = entry_create(new);
-    ret = add_entry(curproc->proc_ft, entry);
-    if (ret == -1){
-        return ret;
+    result = add_entry(curproc->proc_ft, entry);
+    if (result == -1){
+        errno = EMFILE;
+		return -1;
     }
 
-	kprintf("Open: %d\n", ret);
+	// kprintf("Open: %d\n", result);
 
 
-    return ret;
+    return result;
 
 }
 

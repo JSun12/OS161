@@ -375,12 +375,11 @@ main()
 	test_dup2();
 	printf("Passed Part 4 of fsyscalltest\n");
 
-	if(1 == 0){
-		dir_test();
-		printf("Passed Part 5 of fsyscalltest\n");
+	dir_test();
+	printf("Passed Part 5 of fsyscalltest\n");
 
-		printf("All done!\n");
-	}
+	printf("All done!\n");
+	
 
 	return 0;
 }

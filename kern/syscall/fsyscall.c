@@ -19,6 +19,7 @@ sys_open(const char *filename, int flags)
     struct vnode *new;
     int ret;
 
+	//TODO: might be better to copy
 	ret = vfs_open((char *)filename, flags, 0, &new);
     if(ret){
 		errno = ret; 
@@ -187,5 +188,33 @@ sys_dup2(int oldfd, int newfd)
 
 	assign_fd(ft, entry, newfd);
 	return newfd;
+}
+
+int
+sys_chdir(const char *pathname)
+{
+	return vfs_chdir((char *) pathname);
+}
+
+int 
+sys___getcwd(char *buf, size_t buflen)
+{
+	struct iovec iov;
+	struct uio u;
+	int result;
+
+	iov.iov_ubase = (userptr_t)buf;
+	iov.iov_len = buflen;		 // length of the memory space
+	u.uio_iov = &iov;
+	u.uio_iovcnt = 1;
+	u.uio_resid = buflen;          // amount to read from the file -> Amount left to transfer
+	u.uio_offset = 0;//entry->offset;
+	u.uio_segflg = UIO_USERSPACE;
+	u.uio_rw = UIO_READ;
+	u.uio_space = curproc->p_addrspace;
+
+	vfs_getcwd(&u);
+	result = buflen - u.uio_resid;
+	return result;
 }
 

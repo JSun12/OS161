@@ -147,6 +147,15 @@ syscall(struct trapframe *tf)
 		if(retval == -1) err = -1; 
 		break;
 
+		case SYS_chdir:
+		err = sys_chdir((const char *)tf->tf_a0);
+		break;
+		
+		case SYS___getcwd:
+		retval = sys___getcwd((char *)tf->tf_a0, (size_t)tf->tf_a1);
+		if(retval == -1) err = -1; 
+		break;
+
 	    default:
 		kprintf("Unknown syscall %d\n", callno);
 		err = ENOSYS;

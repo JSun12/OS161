@@ -37,6 +37,7 @@
 #include <syscall.h>
 #include <fsyscall.h>
 #include <copyinout.h>
+#include <endian.h>
 
 
 /*
@@ -81,13 +82,9 @@ void
 syscall(struct trapframe *tf)
 {
 	int callno;
-	int32_t retval;
-	// int64_t retval64; 
-	// bool use64 = false; 
+	int32_t retval0;
+	int32_t retval1;
 	int err;
-
-	int whence; 
-
 
 	KASSERT(curthread != NULL);
 	KASSERT(curthread->t_curspl == 0);
@@ -96,16 +93,16 @@ syscall(struct trapframe *tf)
 	callno = tf->tf_v0;
 
 	/*
-	 * Initialize retval to 0. Many of the system calls don't
+	 * Initialize retval0 to 0. Many of the system calls don't
 	 * really return a value, just 0 for success and -1 on
-	 * error. Since retval is the value returned on success,
+	 * error. Since retval0 is the value returned on success,
 	 * initialize it to 0 by default; thus it's not necessary to
 	 * deal with it except for calls that return other values,
 	 * like write.
 	 */
 
-	retval = 0;
-	// retval64 = 0; 
+	retval0 = 0;
+	retval1 = 0;
 
 	switch (callno) {
 	    case SYS_reboot:
@@ -118,8 +115,8 @@ syscall(struct trapframe *tf)
 		break;
 
 		case SYS_open:
-		retval = sys_open((const char *) tf->tf_a0, (int) tf->tf_a1);
-		if(retval == -1) err = -1; 
+		retval0 = sys_open((const char *) tf->tf_a0, (int) tf->tf_a1);
+		if(retval0 == -1) err = -1; 
 		break;
 
 		case SYS_close:
@@ -134,17 +131,20 @@ syscall(struct trapframe *tf)
 		err = sys_read((int)tf->tf_a0, (void *)tf->tf_a1, (size_t)tf->tf_a2);
 		break;
 
-		case SYS_lseek: 
-		copyin((const_userptr_t) tf->tf_sp + 16, &whence, sizeof(int)); 
-		off_t *seek = (off_t *) &tf->tf_a2;
-		// in my approach, below should be retval64
-		retval = sys_lseek((int)tf->tf_a0, *seek, whence);
-		err = 0; 
+		case SYS_lseek: ;
+		// int *whence = NULL;		
+		// copyin((const_userptr_t) tf->tf_sp + 16, whence, sizeof(int)); 
+		// off_t *seek = (off_t *) &tf->tf_a2;
+		// uint64_t offset = sys_lseek((int)tf->tf_a0, *seek, *whence);
+		// uint32_t *v0 = NULL; 
+		// uint32_t *v1 = NULL;
+		// split64to32(offset, v0, v1);
+		// err = 0; 
 		break;
 
 		case SYS_dup2:
-		retval = sys_dup2((int)tf->tf_a0, (int)tf->tf_a1);
-		if(retval == -1) err = -1; 
+		retval0 = sys_dup2((int)tf->tf_a0, (int)tf->tf_a1);
+		if(retval0 == -1) err = -1; 
 		break;
 
 		case SYS_chdir:
@@ -152,8 +152,8 @@ syscall(struct trapframe *tf)
 		break;
 		
 		case SYS___getcwd:
-		retval = sys___getcwd((char *)tf->tf_a0, (size_t)tf->tf_a1);
-		if(retval == -1) err = -1; 
+		retval0 = sys___getcwd((char *)tf->tf_a0, (size_t)tf->tf_a1);
+		if(retval0 == -1) err = -1; 
 		break;
 
 	    default:
@@ -174,17 +174,8 @@ syscall(struct trapframe *tf)
 	}
 	else {
 		/* Success. */
-		tf->tf_v0 = retval;
-
-		// if (use64) {}
-		// if (1) {
-
-		// }  
-		// else {
-		// 	int64_t *v01 = (int64_t *) &tf->tf_v0;
-		// 	*v01 = retval64; 
-		// }
-
+		tf->tf_v0 = retval0;
+		tf->tf_v1 = retval1;
 		tf->tf_a3 = 0;      /* signal no error */
 		
 	}

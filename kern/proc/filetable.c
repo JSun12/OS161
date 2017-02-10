@@ -14,6 +14,10 @@ ft_create()
     ft = kmalloc(sizeof(struct ft));
     ft->ft_lock = lock_create("fs_lock");
 
+    for (int i = 0; i < OPEN_MAX; i++) {
+        ft->entries[i] = NULL;
+    }
+
     return ft;
 }
 
@@ -32,37 +36,34 @@ ft_init_std(struct ft *ft){
 
     const char * cons = "con:";  // Filepath of console
 
-    if (ft->used[0] == 0){
+    if (ft->entries[0] == NULL){
         struct vnode *stdin_v;
         int ret;
 
         ret = vfs_open(kstrdup(cons), O_RDONLY, 0, &stdin_v);  //XXX: Check the return value
         ft->entries[0] = entry_create(stdin_v);
         entry_incref(ft->entries[0]);
-        ft->used[0] = 1;
         (void) ret;
         kprintf("STDIN opened\n");
     }
 
-    if (ft->used[1] == 0){
+    if (ft->entries[1] == NULL){
         struct vnode *stdout_v;
         int ret;
 
         ret = vfs_open(kstrdup(cons), O_WRONLY, 0, &stdout_v);  //XXX: Check the return value
         ft->entries[1] = entry_create(stdout_v);
-        ft->used[1] = 1;
         entry_incref(ft->entries[1]);
         (void) ret;
         kprintf("STDOUT opened\n");
     }
 
-    if (ft->used[2] == 0){
+    if (ft->entries[2] == NULL){
         struct vnode *stderr_v;
         int ret;
 
         ret = vfs_open(kstrdup(cons), O_WRONLY, 0, &stderr_v);  //XXX: Check the return value
         ft->entries[2] = entry_create(stderr_v);
-        ft->used[2] = 1;
         entry_incref(ft->entries[2]);
         (void) ret;
         kprintf("STDERR opened\n");
@@ -81,7 +82,7 @@ add_entry(struct ft *ft, struct ft_entry *entry)
     lock_acquire(ft->ft_lock);
 
     for(int i = 3; i < OPEN_MAX; i++){
-        if(!ft->used[i]){
+        if(ft->entries[i] == NULL){
             assign_fd(ft, entry, i);
             lock_release(ft->ft_lock);
             return i;
@@ -97,7 +98,6 @@ void
 assign_fd(struct ft *ft, struct ft_entry *entry, int fd)
 {   
     ft->entries[fd] = entry;
-    ft->used[fd] = 1; 
     entry_incref(entry);
 }
 
@@ -114,17 +114,14 @@ free_fd(struct ft *ft, int fd)
         return -1;
 
     /* Unused position */
-    if (ft->used[fd] == 0){
+    if (ft->entries[fd] == NULL){
         return -1;
     }
 
     lock_acquire(ft->ft_lock);    
 
-    struct ft_entry *entry = ft->entries[fd];
-
-    entry_decref(entry);
+    entry_decref(ft->entries[fd]);
     ft->entries[fd] = NULL;
-    ft->used[fd] = 0;
 
     lock_release(ft->ft_lock);
 
@@ -134,7 +131,7 @@ free_fd(struct ft *ft, int fd)
 bool
 fd_used(struct ft *ft, int fd)
 {
-    return ft->used[fd] == 1;
+    return ft->entries[fd] != NULL;
 }
 
 

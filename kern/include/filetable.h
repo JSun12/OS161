@@ -13,7 +13,6 @@
 struct ft {
     struct lock *ft_lock;
     struct ft_entry *entries[OPEN_MAX];
-    int used[OPEN_MAX];
 };
 
 // Entry of a file table

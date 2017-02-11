@@ -129,8 +129,7 @@ syscall(struct trapframe *tf)
 		break;
 
 		case SYS_read:
-		retval0 = sys_read((int)tf->tf_a0, (void *)tf->tf_a1, (size_t)tf->tf_a2);
-		if (retval0 == -1) err = -1;
+		err = sys_read((int)tf->tf_a0, (void *)tf->tf_a1, (size_t)tf->tf_a2, &retval0);
 		break;
 
 		case SYS_lseek: ;
@@ -141,8 +140,7 @@ syscall(struct trapframe *tf)
 		break;
 
 		case SYS_dup2:
-		retval0 = sys_dup2((int)tf->tf_a0, (int)tf->tf_a1);
-		if(retval0 == -1) err = -1;
+		err = sys_dup2((int)tf->tf_a0, (int)tf->tf_a1, &retval0);
 		break;
 
 		case SYS_chdir:
@@ -150,8 +148,7 @@ syscall(struct trapframe *tf)
 		break;
 
 		case SYS___getcwd:
-		retval0 = sys___getcwd((char *)tf->tf_a0, (size_t)tf->tf_a1);
-		if(retval0 == -1) err = -1;
+		err = sys___getcwd((char *)tf->tf_a0, (size_t)tf->tf_a1, &retval0);
 		break;
 
 	    default:

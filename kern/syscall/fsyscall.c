@@ -88,8 +88,7 @@ sys_close(int fd)
 {
 	int result = free_fd(curproc->proc_ft, fd);
 	if (result == -1) {
-		errno = EBADF;
-		return -1;
+		return EBADF;
 	}
 	// kprintf("Close: %d\n", fd);
 	return 0;
@@ -151,14 +150,13 @@ The file must be open for reading.
 
 The current seek position of the file is advanced by the number of bytes read.
 */
-ssize_t
-sys_read(int fd, void *buf, size_t buflen)
+int
+sys_read(int fd, void *buf, size_t buflen, ssize_t *output)
 {
     //XXX: Lock this
 
 	if (!fd_valid_and_used(curproc->proc_ft, fd)) {
-		errno = EBADF;
-		return -1;
+		return EBADF;
 	}
 
 
@@ -179,8 +177,7 @@ sys_read(int fd, void *buf, size_t buflen)
 
 	result = VOP_READ(entry->file, &u);
 	if (result) {
-		errno = result;
-		return -1;
+		return result;
 	}
 
 	ssize_t len = buflen - u.uio_resid;
@@ -194,7 +191,8 @@ sys_read(int fd, void *buf, size_t buflen)
 	// eof = stat->st_size;
 	// kprintf("eof: %d\n", (int) eof);
 
-    return len;
+    *output = len;
+    return 0;
 }
 
 int
@@ -257,19 +255,17 @@ sys_lseek(int fd, off_t pos, int whence, int32_t *retval0, int32_t *retval1)
 }
 
 int
-sys_dup2(int oldfd, int newfd)
+sys_dup2(int oldfd, int newfd, int *output)
 {
 	struct ft *ft = curproc->proc_ft;
 	struct ft_entry *entry = ft->entries[oldfd];
 
 	if (!fd_valid_and_used(ft, oldfd)) {
-		errno = EBADF;
-		return -1;
+		return EBADF;
 	}
 
 	if (newfd < 0 || newfd > OPEN_MAX) {
-		errno = EBADF;
-		return -1;
+		return EBADF;
 	}
 
 	if (fd_valid_and_used(ft, newfd)){
@@ -277,22 +273,26 @@ sys_dup2(int oldfd, int newfd)
 	}
 
 	assign_fd(ft, entry, newfd);
-	return newfd;
+    *output = newfd;
+	return 0;
 }
 
 int
 sys_chdir(const char *pathname)
 {
+    if (pathname == NULL){
+        return EFAULT;
+    }
+
 	int result = vfs_chdir((char *) pathname);
 	if (result) {
-		errno = result;
-		return -1;
+		return result;
 	}
 	return 0;
 }
 
 int
-sys___getcwd(char *buf, size_t buflen)
+sys___getcwd(char *buf, size_t buflen, int32_t *output)
 {
 	struct iovec iov;
 	struct uio u;
@@ -310,9 +310,9 @@ sys___getcwd(char *buf, size_t buflen)
 
 	result = vfs_getcwd(&u);
 	if (result) {
-		errno = result;
-		return -1;
+		return result;
 	}
-	result = buflen - u.uio_resid;
-	return result;
+
+	*output = buflen - u.uio_resid;
+	return 0;
 }

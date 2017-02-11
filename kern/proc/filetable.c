@@ -44,7 +44,7 @@ ft_init_std(struct ft *ft){
         ft->entries[0] = entry_create(stdin_v);
         entry_incref(ft->entries[0]);
         (void) ret;
-        kprintf("STDIN opened\n");
+        // kprintf("STDIN opened\n");
     }
 
     if (ft->entries[1] == NULL){
@@ -55,7 +55,7 @@ ft_init_std(struct ft *ft){
         ft->entries[1] = entry_create(stdout_v);
         entry_incref(ft->entries[1]);
         (void) ret;
-        kprintf("STDOUT opened\n");
+        // kprintf("STDOUT opened\n");
     }
 
     if (ft->entries[2] == NULL){
@@ -66,7 +66,7 @@ ft_init_std(struct ft *ft){
         ft->entries[2] = entry_create(stderr_v);
         entry_incref(ft->entries[2]);
         (void) ret;
-        kprintf("STDERR opened\n");
+        // kprintf("STDERR opened\n");
     }
 
 }

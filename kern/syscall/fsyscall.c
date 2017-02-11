@@ -71,14 +71,13 @@ write writes up to buflen bytes to the file specified by fd, at the
 location in the file specified by the current seek position of the file, 
 taking the data from the space pointed to by buf. The file must be open for writing.
 */
-ssize_t
-sys_write(int fd, const void *buf, size_t nbytes)
+int
+sys_write(int fd, const void *buf, size_t nbytes, int32_t *retval0)
 {
     //XXX: Lock this
 
 	if (!fd_valid_and_used(curproc->proc_ft, fd)) {
-		errno = EBADF;
-		return -1;
+		return EBADF;
 	}
 
     struct iovec iov;
@@ -98,11 +97,11 @@ sys_write(int fd, const void *buf, size_t nbytes)
 
 	result = VOP_WRITE(entry->file, &u);
 	if (result) {
-		errno = result;
-		return -1;
+		return result;
 	}
 
-	entry->offset += nbytes - u.uio_resid; //hopefully correct implementation
+	ssize_t len = nbytes - u.uio_resid;
+	entry->offset += (off_t) len; //hopefully correct implementation
 	// kprintf("Current offset: %d\n", (int) entry->offset);
 
 	// struct stat *stat; 
@@ -112,7 +111,8 @@ sys_write(int fd, const void *buf, size_t nbytes)
 	// eof = stat->st_size;
 	// kprintf("eof: %d\n", (int) eof);
 
-    return 0;
+    *retval0 = len;
+	return 0;
 }
 /*
 read reads up to buflen bytes from the file specified by fd,
@@ -154,10 +154,10 @@ sys_read(int fd, void *buf, size_t buflen)
 		return -1;
 	}
 
-	entry->offset += buflen - u.uio_resid; //hopefully correct implementation
+	ssize_t len = buflen - u.uio_resid;
+	entry->offset += (off_t) len; //hopefully correct implementation
 	// kprintf("Current offset: %d\n", (int) entry->offset);
-	
-	
+
 	// struct stat *stat; 
 	// off_t eof; 
 	// stat = kmalloc(sizeof(struct stat));
@@ -165,11 +165,11 @@ sys_read(int fd, void *buf, size_t buflen)
 	// eof = stat->st_size;
 	// kprintf("eof: %d\n", (int) eof);
 
-    return 0;
+    return len;
 }
 
-off_t 
-sys_lseek(int fd, off_t pos, int whence)
+int 
+sys_lseek(int fd, off_t pos, int whence, int32_t *retval0, int32_t *retval1)
 {
 
 	// kprintf("%d\n", fd);
@@ -177,31 +177,54 @@ sys_lseek(int fd, off_t pos, int whence)
 	// kprintf("%d\n", whence);
 	//XXX: Lock this
 
+	if (whence < 0 || whence > 2) {
+		return EINVAL;
+	}
+
 	struct ft *ft = curproc->proc_ft;
 	struct ft_entry *entry; 
 	struct stat *stat; 
 	off_t eof; 
+	off_t seek;
 
-	stat = kmalloc(sizeof(struct stat));
+	if (!fd_valid_and_used(ft, fd)) {
+		return EBADF;
+	}	
 
 	entry = ft->entries[fd];
 
+	if (!VOP_ISSEEKABLE(entry->file)) {
+		return ESPIPE;
+	}
+	
+	stat = kmalloc(sizeof(struct stat));
 	VOP_STAT(entry->file, stat);
 	eof = stat->st_size;
 
+	seek = entry->offset;
+
 	switch (whence) {
 		case SEEK_SET: 
-		entry->offset = pos; 
+		seek = pos; 
 		break;
 		case SEEK_CUR:
-		entry->offset += pos; 
+		seek += pos; 
 		break;
 		case SEEK_END:
-		entry->offset = eof + pos;
+		seek = eof + pos;
 		break;	
 	}
 
-	return entry->offset;
+	if (seek < 0) {
+		return EINVAL;
+	}
+
+	entry->offset = seek;
+
+	*retval0 = seek >> 32;
+	*retval1 = seek & 0xFFFFFFFF;
+
+	return 0;
 }
 
 int
@@ -210,7 +233,7 @@ sys_dup2(int oldfd, int newfd)
 	struct ft *ft = curproc->proc_ft;
 	struct ft_entry *entry = ft->entries[oldfd];
 
-	if (!fd_valid_and_used(ft, oldfd)){
+	if (!fd_valid_and_used(ft, oldfd)) {
 		errno = EBADF;
 		return -1;
 	}

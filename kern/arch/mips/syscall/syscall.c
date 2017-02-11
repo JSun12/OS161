@@ -38,7 +38,6 @@
 #include <addrspace.h>
 #include <copyinout.h>
 #include <fsyscall.h>
-#include <endian.h>
 #include <syscall.h>
 
 
@@ -104,7 +103,7 @@ syscall(struct trapframe *tf)
 	 */
 
 	retval0 = 0;
-	retval1 = tf->tf_v1;
+	retval1 = 0;
 	err = 0;
 
 	switch (callno) {
@@ -127,21 +126,19 @@ syscall(struct trapframe *tf)
 		break;
 
 		case SYS_write:
-		err = sys_write((int)tf->tf_a0, (const void *)tf->tf_a1, (size_t)tf->tf_a2);
+		err = sys_write((int)tf->tf_a0, (const void *)tf->tf_a1, (size_t)tf->tf_a2, &retval0);
 		break;
 
 		case SYS_read:
-		err = sys_read((int)tf->tf_a0, (void *)tf->tf_a1, (size_t)tf->tf_a2);
+		retval0 = sys_read((int)tf->tf_a0, (void *)tf->tf_a1, (size_t)tf->tf_a2);
+		if (retval0 == -1) err = -1; 
 		break;
 
 		case SYS_lseek: ;
-		int whence = 0;		
+		int whence = 0;	
 		copyin((const_userptr_t) tf->tf_sp + 16, &whence, sizeof(int)); 
 		off_t *seek = (off_t *) &tf->tf_a2;
-		uint64_t offset = sys_lseek((int)tf->tf_a0, *seek, whence);
-		// split64to32(offset, (uint32_t *) &retval0, (uint32_t *) &retval1);
-		retval0 = offset >> 32;
-		retval1 = offset & 0xFFFFFFFF;
+		err = sys_lseek((int)tf->tf_a0, *seek, whence, &retval0, &retval1);
 		break;
 
 		case SYS_dup2:

@@ -9,6 +9,7 @@
 #include <kern/stat.h>
 #include <kern/fcntl.h>
 #include <kern/errno.h>
+#include <vm.h>
 
 
 // must make extern (use as errno for now)
@@ -33,6 +34,14 @@ sys_open(const char *filename, int flags, int32_t *output)
 
     if (filename == NULL){
         return EFAULT;
+    }
+
+    //if (USERSTACK < (unsigned int) filename && (unsigned int) filename > USERSPACETOP){
+    //    return EBADF;
+    //}
+
+    if ((unsigned int) filename > USERSPACETOP){
+        return EBADF;
     }
 
     path = (char *) kstrdup(filename);

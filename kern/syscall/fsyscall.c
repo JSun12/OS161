@@ -22,19 +22,10 @@ sys_open(const char *filename, int flags)
     int result;
 	char *path = (char *) kstrdup(filename);
 
-	if (!(flags & O_CREAT)){
-		result = vfs_lookup(path, &new);
-		if (result){
-			errno = result;
-			return -1;
-		}
-	} 
-	else {
-		result = vfs_open(path, flags, 0, &new);
-		if (result){
-			errno = result;
-			return -1;
-		}
+	result = vfs_open(path, flags, 0, &new);
+	if (result){
+		errno = result;
+		return -1;
 	}
 
     struct ft_entry *entry = entry_create(new);
@@ -152,7 +143,7 @@ sys_read(int fd, void *buf, size_t buflen)
 	u.uio_iov = &iov;
 	u.uio_iovcnt = 1;
 	u.uio_resid = buflen;          // amount to read from the file -> Amount left to transfer
-	u.uio_offset = 0;//entry->offset;
+	u.uio_offset = entry->offset;
 	u.uio_segflg = UIO_USERSPACE;
 	u.uio_rw = UIO_READ;
 	u.uio_space = curproc->p_addrspace;

@@ -265,7 +265,6 @@ simultaneous_write_test()
 
 	/* Rewind both files */
 	lseek_ret = lseek(fd1, -(40-seekpos), SEEK_CUR);
-	printf("%d\n", (int) lseek_ret);
 	if (lseek_ret != seekpos) {
 		err(1, "%s: lseek", file1);
 	}
@@ -367,10 +366,8 @@ main()
     simple_test();
     printf("Passed Part 2 of fsyscalltest\n");
 
-	if(1 == 0){
-		simultaneous_write_test();
-		printf("Passed Part 3 of fsyscalltest\n");
-	}
+	simultaneous_write_test();
+	printf("Passed Part 3 of fsyscalltest\n");
 
 	test_dup2();
 	printf("Passed Part 4 of fsyscalltest\n");

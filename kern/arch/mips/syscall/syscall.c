@@ -34,10 +34,12 @@
 #include <mips/trapframe.h>
 #include <thread.h>
 #include <current.h>
-#include <syscall.h>
-#include <fsyscall.h>
+#include <proc.h>
+#include <addrspace.h>
 #include <copyinout.h>
+#include <fsyscall.h>
 #include <endian.h>
+#include <syscall.h>
 
 
 /*
@@ -102,7 +104,8 @@ syscall(struct trapframe *tf)
 	 */
 
 	retval0 = 0;
-	retval1 = 0;
+	retval1 = tf->tf_v1;
+	err = 0;
 
 	switch (callno) {
 	    case SYS_reboot:
@@ -132,14 +135,13 @@ syscall(struct trapframe *tf)
 		break;
 
 		case SYS_lseek: ;
-		// int *whence = NULL;		
-		// copyin((const_userptr_t) tf->tf_sp + 16, whence, sizeof(int)); 
-		// off_t *seek = (off_t *) &tf->tf_a2;
-		// uint64_t offset = sys_lseek((int)tf->tf_a0, *seek, *whence);
-		// uint32_t *v0 = NULL; 
-		// uint32_t *v1 = NULL;
-		// split64to32(offset, v0, v1);
-		// err = 0; 
+		int whence = 0;		
+		copyin((const_userptr_t) tf->tf_sp + 16, &whence, sizeof(int)); 
+		off_t *seek = (off_t *) &tf->tf_a2;
+		uint64_t offset = sys_lseek((int)tf->tf_a0, *seek, whence);
+		// split64to32(offset, (uint32_t *) &retval0, (uint32_t *) &retval1);
+		retval0 = offset >> 32;
+		retval1 = offset & 0xFFFFFFFF;
 		break;
 
 		case SYS_dup2:

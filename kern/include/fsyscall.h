@@ -6,7 +6,7 @@
 #include <kern/seek.h>
 
 
-int sys_open(const char *, int);
+int sys_open(const char *, int, int32_t *);
 int sys_close(int);
 int sys_write(int fd, const void *buf, size_t nbytes, int32_t *);
 ssize_t sys_read(int fd, void *buf, size_t buflen);

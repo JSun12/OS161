@@ -14,40 +14,60 @@
 // must make extern (use as errno for now)
 int errno;
 
-
 int
-sys_open(const char *filename, int flags)
+sys_open(const char *filename, int flags, int32_t *output)
 {
+    //TODO: Implement these
+    /*
+    ENOTDIR	A non-final component of filename was not a directory.
+    EEXIST	The named file exists, and O_EXCL was specified.
+    EISDIR	The named object is a directory, and it was to be opened for writing.
+    ENFILE	The system file table is full, if such a thing exists, or a system-wide limit on open files was reached.
+    EIO	A hard I/O error occurred.
+    EFAULT
+    */
+
     struct vnode *new;
     int result;
-	char *path = (char *) kstrdup(filename);
+	char *path;
 
+    if (filename == NULL){
+        return EFAULT;
+    }
+
+    path = (char *) kstrdup(filename);
 	result = vfs_open(path, flags, 0, &new);
-	if (result){
-		errno = result;
-		return -1;
-	}
+
+	if (result) {
+		return result;
+    }
 
     struct ft_entry *entry = entry_create(new);
     result = add_entry(curproc->proc_ft, entry);
+
     if (result == -1){
-        errno = EMFILE;
-		return -1;
+        return EMFILE;
     }
 
 	if (flags & O_APPEND) {
-		struct stat *stat; 
-		off_t eof; 
+
+        struct stat *stat;
+		off_t eof;
 		stat = kmalloc(sizeof(struct stat));
+
+        if(stat == NULL){
+            return ENOMEM;
+        }
+
 		VOP_STAT(entry->file, stat);
 		eof = stat->st_size;
-		entry->offset = eof;		
+		entry->offset = eof;
+        kfree(stat);
 	}
 
-	// kprintf("Open: %d\n", result);
+    *output = result;
 
-    return result;
-
+    return 0;
 }
 
 /*
@@ -67,8 +87,8 @@ sys_close(int fd)
 }
 
 /*
-write writes up to buflen bytes to the file specified by fd, at the 
-location in the file specified by the current seek position of the file, 
+write writes up to buflen bytes to the file specified by fd, at the
+location in the file specified by the current seek position of the file,
 taking the data from the space pointed to by buf. The file must be open for writing.
 */
 int
@@ -104,8 +124,8 @@ sys_write(int fd, const void *buf, size_t nbytes, int32_t *retval0)
 	entry->offset += (off_t) len; //hopefully correct implementation
 	// kprintf("Current offset: %d\n", (int) entry->offset);
 
-	// struct stat *stat; 
-	// off_t eof; 
+	// struct stat *stat;
+	// off_t eof;
 	// stat = kmalloc(sizeof(struct stat));
 	// VOP_STAT(entry->file, stat);
 	// eof = stat->st_size;
@@ -158,8 +178,8 @@ sys_read(int fd, void *buf, size_t buflen)
 	entry->offset += (off_t) len; //hopefully correct implementation
 	// kprintf("Current offset: %d\n", (int) entry->offset);
 
-	// struct stat *stat; 
-	// off_t eof; 
+	// struct stat *stat;
+	// off_t eof;
 	// stat = kmalloc(sizeof(struct stat));
 	// VOP_STAT(entry->file, stat);
 	// eof = stat->st_size;
@@ -168,7 +188,7 @@ sys_read(int fd, void *buf, size_t buflen)
     return len;
 }
 
-int 
+int
 sys_lseek(int fd, off_t pos, int whence, int32_t *retval0, int32_t *retval1)
 {
 
@@ -182,21 +202,21 @@ sys_lseek(int fd, off_t pos, int whence, int32_t *retval0, int32_t *retval1)
 	}
 
 	struct ft *ft = curproc->proc_ft;
-	struct ft_entry *entry; 
-	struct stat *stat; 
-	off_t eof; 
+	struct ft_entry *entry;
+	struct stat *stat;
+	off_t eof;
 	off_t seek;
 
 	if (!fd_valid_and_used(ft, fd)) {
 		return EBADF;
-	}	
+	}
 
 	entry = ft->entries[fd];
 
 	if (!VOP_ISSEEKABLE(entry->file)) {
 		return ESPIPE;
 	}
-	
+
 	stat = kmalloc(sizeof(struct stat));
 	VOP_STAT(entry->file, stat);
 	eof = stat->st_size;
@@ -204,15 +224,15 @@ sys_lseek(int fd, off_t pos, int whence, int32_t *retval0, int32_t *retval1)
 	seek = entry->offset;
 
 	switch (whence) {
-		case SEEK_SET: 
-		seek = pos; 
+		case SEEK_SET:
+		seek = pos;
 		break;
 		case SEEK_CUR:
-		seek += pos; 
+		seek += pos;
 		break;
 		case SEEK_END:
 		seek = eof + pos;
-		break;	
+		break;
 	}
 
 	if (seek < 0) {
@@ -259,10 +279,10 @@ sys_chdir(const char *pathname)
 		errno = result;
 		return -1;
 	}
-	return 0; 
+	return 0;
 }
 
-int 
+int
 sys___getcwd(char *buf, size_t buflen)
 {
 	struct iovec iov;
@@ -287,4 +307,3 @@ sys___getcwd(char *buf, size_t buflen)
 	result = buflen - u.uio_resid;
 	return result;
 }
-

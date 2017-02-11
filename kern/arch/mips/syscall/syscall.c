@@ -117,8 +117,7 @@ syscall(struct trapframe *tf)
 		break;
 
 		case SYS_open:
-		retval0 = sys_open((const char *) tf->tf_a0, (int) tf->tf_a1);
-		if(retval0 == -1) err = -1; 
+		err = sys_open((const char *) tf->tf_a0, (int) tf->tf_a1, &retval0);
 		break;
 
 		case SYS_close:
@@ -131,28 +130,28 @@ syscall(struct trapframe *tf)
 
 		case SYS_read:
 		retval0 = sys_read((int)tf->tf_a0, (void *)tf->tf_a1, (size_t)tf->tf_a2);
-		if (retval0 == -1) err = -1; 
+		if (retval0 == -1) err = -1;
 		break;
 
 		case SYS_lseek: ;
-		int whence = 0;	
-		copyin((const_userptr_t) tf->tf_sp + 16, &whence, sizeof(int)); 
+		int whence = 0;
+		copyin((const_userptr_t) tf->tf_sp + 16, &whence, sizeof(int));
 		off_t *seek = (off_t *) &tf->tf_a2;
 		err = sys_lseek((int)tf->tf_a0, *seek, whence, &retval0, &retval1);
 		break;
 
 		case SYS_dup2:
 		retval0 = sys_dup2((int)tf->tf_a0, (int)tf->tf_a1);
-		if(retval0 == -1) err = -1; 
+		if(retval0 == -1) err = -1;
 		break;
 
 		case SYS_chdir:
 		err = sys_chdir((const char *)tf->tf_a0);
 		break;
-		
+
 		case SYS___getcwd:
 		retval0 = sys___getcwd((char *)tf->tf_a0, (size_t)tf->tf_a1);
-		if(retval0 == -1) err = -1; 
+		if(retval0 == -1) err = -1;
 		break;
 
 	    default:
@@ -160,7 +159,6 @@ syscall(struct trapframe *tf)
 		err = ENOSYS;
 		break;
 	}
-
 
 	if (err) {
 		/*
@@ -176,7 +174,7 @@ syscall(struct trapframe *tf)
 		tf->tf_v0 = retval0;
 		tf->tf_v1 = retval1;
 		tf->tf_a3 = 0;      /* signal no error */
-		
+
 	}
 
 	/*

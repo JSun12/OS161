@@ -74,6 +74,8 @@ sys_open(const char *filename, int flags, int32_t *output)
         kfree(stat);
 	}
 
+	entry->rwflags = flags;
+
     *output = result;
 
     return 0;
@@ -112,6 +114,10 @@ sys_write(int fd, const void *buf, size_t nbytes, int32_t *retval0)
 	struct uio u;
 	int result;
     struct ft_entry *entry = curproc->proc_ft->entries[fd];
+
+	if (!(entry->rwflags & (O_WRONLY | O_RDWR))) {
+		return EBADF;
+	}
 
 	iov.iov_ubase = (userptr_t)buf;
 	iov.iov_len = nbytes;		 // length of the memory space
@@ -164,6 +170,10 @@ sys_read(int fd, void *buf, size_t buflen, ssize_t *output)
 	struct uio u;
 	int result;
     struct ft_entry *entry = curproc->proc_ft->entries[fd];
+
+	if (entry->rwflags & O_WRONLY) {
+		return EBADF;
+	}
 
 	iov.iov_ubase = (userptr_t)buf;
 	iov.iov_len = buflen;		 // length of the memory space
@@ -264,7 +274,7 @@ sys_dup2(int oldfd, int newfd, int *output)
 		return EBADF;
 	}
 
-	if (newfd < 0 || newfd > OPEN_MAX) {
+	if (newfd < 0 || newfd >= OPEN_MAX) {
 		return EBADF;
 	}
 

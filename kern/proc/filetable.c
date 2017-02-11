@@ -42,6 +42,7 @@ ft_init_std(struct ft *ft){
 
         ret = vfs_open(kstrdup(cons), O_RDONLY, 0, &stdin_v);  //XXX: Check the return value
         ft->entries[0] = entry_create(stdin_v);
+        ft->entries[0]->rwflags = O_RDONLY;
         entry_incref(ft->entries[0]);
         (void) ret;
         // kprintf("STDIN opened\n");
@@ -53,6 +54,7 @@ ft_init_std(struct ft *ft){
 
         ret = vfs_open(kstrdup(cons), O_WRONLY, 0, &stdout_v);  //XXX: Check the return value
         ft->entries[1] = entry_create(stdout_v);
+        ft->entries[1]->rwflags = O_WRONLY;
         entry_incref(ft->entries[1]);
         (void) ret;
         // kprintf("STDOUT opened\n");
@@ -64,6 +66,7 @@ ft_init_std(struct ft *ft){
 
         ret = vfs_open(kstrdup(cons), O_WRONLY, 0, &stderr_v);  //XXX: Check the return value
         ft->entries[2] = entry_create(stderr_v);
+        ft->entries[2]->rwflags = O_WRONLY;
         entry_incref(ft->entries[2]);
         (void) ret;
         // kprintf("STDERR opened\n");

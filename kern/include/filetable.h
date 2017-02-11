@@ -22,6 +22,7 @@ struct ft_entry {
     struct vnode *file;
     off_t offset;
     const char* path;
+    int rwflags; 
 };
 
 // Functions

@@ -5,3 +5,4 @@ kern/compile/*
 /kern/cscope.*
 userland/cscope.*
 **/build
+kern/vm/.copyinout.c.swp

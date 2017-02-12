@@ -11,10 +11,9 @@
 #include <kern/errno.h>
 #include <vm.h>
 
-
-// must make extern (use as errno for now)
-int errno;
-
+/*
+Opens the given file for reading with the given flags.
+*/
 int
 sys_open(const char *filename, int flags, int32_t *output)
 {
@@ -52,18 +51,20 @@ sys_open(const char *filename, int flags, int32_t *output)
     }
 
     struct ft_entry *entry = entry_create(new);
-    result = add_entry(curproc->proc_ft, entry);
+	if (entry == NULL) {
+		return ENOMEM;
+	}
 
-    if (result == -1){
+    result = add_entry(curproc->proc_ft, entry);
+    if (result < 0){
         return EMFILE;
     }
 
 	if (flags & O_APPEND) {
-
         struct stat *stat;
 		off_t eof;
-		stat = kmalloc(sizeof(struct stat));
 
+		stat = kmalloc(sizeof(struct stat));
         if(stat == NULL){
             return ENOMEM;
         }
@@ -82,29 +83,29 @@ sys_open(const char *filename, int flags, int32_t *output)
 }
 
 /*
-  Atomic removal of an entry from the filetable.
-  Vfs file is also properly closed.
+Atomic removal of an entry from the filetable.
+Vfs file is also properly closed.
 */
 int
 sys_close(int fd)
 {
-	int result = free_fd(curproc->proc_ft, fd);
-	if (result == -1) {
+	if(!fd_valid(fd)) {
 		return EBADF;
 	}
-	// kprintf("Close: %d\n", fd);
+	
+	free_fd(curproc->proc_ft, fd);
+	
 	return 0;
 }
 
 /*
-write writes up to buflen bytes to the file specified by fd, at the
+Writes up to buflen bytes to the file specified by fd, at the
 location in the file specified by the current seek position of the file,
 taking the data from the space pointed to by buf. The file must be open for writing.
 */
 int
 sys_write(int fd, const void *buf, size_t nbytes, int32_t *retval0)
 {
-    //XXX: Lock this
 
 	if (!fd_valid_and_used(curproc->proc_ft, fd)) {
 		return EBADF;
@@ -135,31 +136,21 @@ sys_write(int fd, const void *buf, size_t nbytes, int32_t *retval0)
 	}
 
 	ssize_t len = nbytes - u.uio_resid;
-	entry->offset += (off_t) len; //hopefully correct implementation
-	// kprintf("Current offset: %d\n", (int) entry->offset);
-
-	// struct stat *stat;
-	// off_t eof;
-	// stat = kmalloc(sizeof(struct stat));
-	// VOP_STAT(entry->file, stat);
-	// eof = stat->st_size;
-	// kprintf("eof: %d\n", (int) eof);
+	entry->offset += (off_t) len;
 
     *retval0 = len;
 	return 0;
 }
+
 /*
-read reads up to buflen bytes from the file specified by fd,
+Reads up to buflen bytes from the file specified by fd,
 at the location in the file specified by the current seek position
 of the file, and stores them in the space pointed to by buf.
 The file must be open for reading.
-
-The current seek position of the file is advanced by the number of bytes read.
 */
 int
-sys_read(int fd, void *buf, size_t buflen, ssize_t *output)
+sys_read(int fd, void *buf, size_t buflen, ssize_t *retval0)
 {
-    //XXX: Lock this
 
 	if (!fd_valid_and_used(curproc->proc_ft, fd)) {
 		return EBADF;
@@ -191,28 +182,18 @@ sys_read(int fd, void *buf, size_t buflen, ssize_t *output)
 	}
 
 	ssize_t len = buflen - u.uio_resid;
-	entry->offset += (off_t) len; //hopefully correct implementation
-	// kprintf("Current offset: %d\n", (int) entry->offset);
+	entry->offset += (off_t) len;
 
-	// struct stat *stat;
-	// off_t eof;
-	// stat = kmalloc(sizeof(struct stat));
-	// VOP_STAT(entry->file, stat);
-	// eof = stat->st_size;
-	// kprintf("eof: %d\n", (int) eof);
-
-    *output = len;
+    *retval0 = len;
     return 0;
 }
 
+/*
+Sets the files seek position as indicated, according to whence.
+*/
 int
 sys_lseek(int fd, off_t pos, int whence, int32_t *retval0, int32_t *retval1)
 {
-
-	// kprintf("%d\n", fd);
-	// kprintf("%ld\n", (long) pos);
-	// kprintf("%d\n", whence);
-	//XXX: Lock this
 
 	if (whence < 0 || whence > 2) {
 		return EINVAL;
@@ -264,6 +245,11 @@ sys_lseek(int fd, off_t pos, int whence, int32_t *retval0, int32_t *retval1)
 	return 0;
 }
 
+/*
+Clones the instance of the open file at the old descriptor
+to the new descriptor. If there are open files in the new
+descriptor, they are closed.
+*/
 int
 sys_dup2(int oldfd, int newfd, int *output)
 {
@@ -287,6 +273,9 @@ sys_dup2(int oldfd, int newfd, int *output)
 	return 0;
 }
 
+/*
+Changes the current working directory.
+*/
 int
 sys_chdir(const char *pathname)
 {
@@ -301,6 +290,10 @@ sys_chdir(const char *pathname)
 	return 0;
 }
 
+/*
+Stores the current working directory in the output in the given
+char buf, provides by the user.
+*/
 int
 sys___getcwd(char *buf, size_t buflen, int32_t *output)
 {
@@ -313,7 +306,7 @@ sys___getcwd(char *buf, size_t buflen, int32_t *output)
 	u.uio_iov = &iov;
 	u.uio_iovcnt = 1;
 	u.uio_resid = buflen;          // amount to read from the file -> Amount left to transfer
-	u.uio_offset = 0;//entry->offset;
+	u.uio_offset = 0;
 	u.uio_segflg = UIO_USERSPACE;
 	u.uio_rw = UIO_READ;
 	u.uio_space = curproc->p_addrspace;

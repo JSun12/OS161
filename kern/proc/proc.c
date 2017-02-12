@@ -74,7 +74,13 @@ proc_create(const char *name)
 		kfree(proc);
 		return NULL;
 	}
-
+	proc->proc_ft = ft_create();
+	if (proc->proc_ft == NULL) {
+		kfree(proc->p_name); //how to delete string?
+		kfree(proc); 
+		return NULL;
+	}
+	
 	threadarray_init(&proc->p_threads);
 	spinlock_init(&proc->p_lock);
 
@@ -84,7 +90,6 @@ proc_create(const char *name)
 	/* VFS fields */
 	proc->p_cwd = NULL;
 
-	proc->proc_ft = ft_create();
 
 	return proc;
 }
@@ -202,11 +207,18 @@ struct proc *
 proc_create_runprogram(const char *name)
 {
 	struct proc *newproc;
+	int ret;
 
 	newproc = proc_create(name);
 	if (newproc == NULL) {
 		return NULL;
 	}
+
+	ret = ft_init_std(newproc->proc_ft);
+	if (ret) {
+		kfree(newproc);
+		return NULL;
+	}	
 
 	/* VM fields */
 
@@ -228,7 +240,6 @@ proc_create_runprogram(const char *name)
 
 	/* Initialize console */
 
-	ft_init_std(newproc->proc_ft);
 
 	return newproc;
 }

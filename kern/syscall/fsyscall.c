@@ -87,7 +87,7 @@ Vfs file is also properly closed.
 int
 sys_close(int fd)
 {
-	if(!fd_valid(fd)) {
+	if(!fd_valid_and_used(fd)) {
 		return EBADF;
 	}
 
@@ -252,14 +252,14 @@ descriptor, they are closed.
 int
 sys_dup2(int oldfd, int newfd, int *output)
 {
-	struct ft *ft = curproc->proc_ft;
-	struct ft_entry *entry = ft->entries[oldfd];
-
-	if (!fd_valid_and_used(ft, oldfd)) {
+    if (newfd < 0 || oldfd < 0 || newfd >= OPEN_MAX || oldfd >= OPEN_MAX) {
 		return EBADF;
 	}
 
-	if (newfd < 0 || newfd >= OPEN_MAX) {
+    struct ft *ft = curproc->proc_ft;
+	struct ft_entry *entry = ft->entries[oldfd];
+
+	if (!fd_valid_and_used(ft, oldfd)) {
 		return EBADF;
 	}
 

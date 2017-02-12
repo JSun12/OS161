@@ -60,7 +60,7 @@ ft_init_std(struct ft *ft){
 
         ft->entries[0] = entry_create(stdin_v);
         if (ft->entries[0] == NULL) {
-            return ENOMEM; 
+            return ENOMEM;
         }
 
         ft->entries[0]->rwflags = O_RDONLY;
@@ -79,9 +79,9 @@ ft_init_std(struct ft *ft){
 
         ft->entries[1] = entry_create(stdout_v);
         if (ft->entries[1] == NULL) {
-            return ENOMEM; 
+            return ENOMEM;
         }
-        
+
         ft->entries[1]->rwflags = O_WRONLY;
         entry_incref(ft->entries[1]);
         (void) ret;
@@ -98,7 +98,7 @@ ft_init_std(struct ft *ft){
 
         ft->entries[2] = entry_create(stderr_v);
         if (ft->entries[2] == NULL) {
-            return ENOMEM; 
+            return ENOMEM;
         }
 
         ft->entries[2]->rwflags = O_WRONLY;
@@ -112,7 +112,7 @@ ft_init_std(struct ft *ft){
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 /*
-Returns a -1 if OPEN_MAX files are already open. 
+Returns a -1 if OPEN_MAX files are already open.
 Otherwise, returns new file descriptor.
 */
 int
@@ -138,7 +138,7 @@ add_entry(struct ft *ft, struct ft_entry *entry)
 
 void
 assign_fd(struct ft *ft, struct ft_entry *entry, int fd)
-{   
+{
     KASSERT(ft != NULL);
     KASSERT(entry != NULL);
     KASSERT(fd_valid(fd));
@@ -166,7 +166,7 @@ bool
 fd_valid_and_used(struct ft *ft, int fd)
 {
     KASSERT(ft != NULL);
-    
+
     if (!fd_valid(fd)) {
         return false;
     }
@@ -178,9 +178,9 @@ fd_valid(int fd)
 {
     if (fd < 0 || fd >= OPEN_MAX) {
         return false;
-    } 
+    }
 
-    return true;    
+    return true;
 }
 
 void
@@ -188,15 +188,15 @@ entry_incref(struct ft_entry *entry)
 {
     KASSERT(entry != NULL);
 
-    entry->count += 1; 
+    entry->count += 1;
 }
 
 void
 entry_decref(struct ft_entry *entry)
-{    
+{
     KASSERT(entry != NULL);
 
-    entry->count -= 1; 
+    entry->count -= 1;
     if (entry->count == 0){
         entry_destroy(entry);
     }
@@ -220,10 +220,10 @@ entry_create(struct vnode *vnode)
         kfree(entry);
         return NULL;
     }
-    
+
     entry->file = vnode;
     entry->offset = 0;
-    entry->count = 0; 
+    entry->count = 0;
 
     return entry;
 }
@@ -233,7 +233,7 @@ entry_destroy(struct ft_entry *entry)
 {
     KASSERT(entry != NULL);
 
-    vfs_close(entry->file);    
+    vfs_close(entry->file);
     lock_destroy(entry->entry_lock);
     kfree(entry);
 }

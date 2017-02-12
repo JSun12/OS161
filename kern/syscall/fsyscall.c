@@ -87,7 +87,7 @@ Vfs file is also properly closed.
 int
 sys_close(int fd)
 {
-	if(!fd_valid_and_used(fd)) {
+	if(!fd_valid_and_used(curproc->proc_ft,fd)) {
 		return EBADF;
 	}
 

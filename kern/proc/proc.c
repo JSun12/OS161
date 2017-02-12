@@ -76,7 +76,7 @@ proc_create(const char *name)
 	}
 	proc->proc_ft = ft_create();
 	if (proc->proc_ft == NULL) {
-		kfree(proc->p_name); //how to delete string?
+		kfree(proc->p_name);
 		kfree(proc); 
 		return NULL;
 	}

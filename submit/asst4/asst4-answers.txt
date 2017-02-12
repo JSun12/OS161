@@ -5,20 +5,17 @@ The ELF magic numbers are the first few values of the e_ident array in the elf f
 
 2. 
 
-UIO_USERISPACE is a flag set to indicate that memory transfer occurs between the kernel and a iovec pointing to locations in the userspace. UIO_SYSSPACE is a flag indicating that the iovec points to memory in the kernelspace. One should use the correct flag when wishing to transfer data between the userspace or the kernelspace.
+UIO_USERSPACE is a flag in a uio to indicate that user data is transfered between the kernel and the user. UIO_SYSSPACE indicates that data is transfered within the kernel. UIO_USERISPACE indicates that user code is transfered between the kernel and the user. 
 
-* Add something about ELF
 
 3. 
 
 The memory read goes to vaddr, which is located on the heap. Thus, it does not matter that the uio is defined on the stack, since it a mechanism for transfering data, and not the final data location itself.
 
-* UIO is a static size, so it can go on the stack?
-
 
 4. 
 
-By the time runprogram() calls vfs_close(), it has already loaded the ELF file into new address space (which is the new current address space). At this point, there is no more need for the file to remain open, and it is okay to free the file. This is best practice, since not closing the file can waste system resources.
+By the time runprogram() calls vfs_close(), it has already loaded the ELF file into new address space (which is the new current address space). At this point, there is no more need for the file to remain open, and it is okay to free the file. This is best practice, since not closing the file can waste system resources (memory leak).
 
 
 5.
@@ -31,18 +28,17 @@ The function enter_new_process forces the processor to switch into user mode. It
 -memmove defined in common/libc/string/memmove.c
 -copyin and copyout defined in kern/vm/copyinout.c
 
-copyin and copyout have more complicated implementations than memmove because they are copying memory between the kernelspace to the userspace, so they must ensure that userspace memory being copied from/to falls within the userspace and doesn't overlap with the kernel space
+copyin and copyout have more complicated implementations than memmove because they are copying memory between the kernelspace to the userspace, so they must ensure that userspace memory being copied from/to falls within the userspace and doesn't overlap with the kernel space. In general, copyin and copyout ensure that the memory locations are valid.
 
-* Doesn’t crash kernel? Error checking capabilities.
 
 7. 
 
-userptr_t is a pointer, which points to one byte. It is used to point to blocks of memory in the user space (for example, if we desire to transfer a block of memory from user space to kernel space, we would have a userptr_t that points to the first byte of the block, and have an integer type indicating the size of the whole memory block to be transfered).
+userptr_t is a pointer, which points to one byte. It is used to indicate that the memory pointed to is in the user space(for example, if we desire to transfer a block of memory from user space to kernel space, we would have a userptr_t that points to the first byte of the block, and have an integer type indicating the size of the whole memory block to be transfered).
 
 
 8. 
 
-The numerical value of the exception code for a system call is EX_SYS 8. 
+The numerical value of the exception code for a system call is EX_SYS 8.
 
 
 9. 
@@ -52,9 +48,7 @@ An instruction is 32 bits, as evidenced by how the epc register is incremented b
 
 10. 
 
-kill_curthread does not need to throw a kernel panic for a user code failure. If user code fails, the kernel is allowed to kill it without panic in all situations.
-
-* Currently, kill_curthread() doesn't handle the errors, nor does it kill the thread. Those feature must be implemented for the function to run as promised. 
+kill_curthread does not need to throw a kernel panic for a user code failure. If user code fails, the kernel is allowed to kill it without panic in all situations. Currently, kill_curthread() doesn't handle the errors, nor does it kill the thread. Those feature must be implemented for the function to run as promised. 
 
 
 11. 
@@ -69,12 +63,12 @@ The shell script gensyscalls.sh uses the SYSCALL macro to generate assembly for 
 
 13. 
 
-
+This is found in line 85 of syscalls-mips.S, which is the "syscall" instruction.
 
 
 14. 
 
-The file handle should be in register a0, whence in a1, and offset in a2/a3. Returning from the syscall, the return should be in registers v0/v1.
+The file handle should be in register a0, offset in a2/a3, and whence in the user stack, at sp+16. Returning from the syscall, the return should be in registers v0/v1.
 
 
 15. 

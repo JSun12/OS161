@@ -10,6 +10,8 @@
 #include <kern/fcntl.h>
 #include <kern/errno.h>
 #include <vm.h>
+#include <copyinout.h>
+#include <limits.h>
 
 /*
 Opens the given file for reading with the given flags.
@@ -17,34 +19,30 @@ Opens the given file for reading with the given flags.
 int
 sys_open(const char *filename, int flags, int32_t *output)
 {
-    //TODO: Implement these
-    /*
-    ENOTDIR	A non-final component of filename was not a directory.
-    EEXIST	The named file exists, and O_EXCL was specified.
-    EISDIR	The named object is a directory, and it was to be opened for writing.
-    ENFILE	The system file table is full, if such a thing exists, or a system-wide limit on open files was reached.
-    EIO	A hard I/O error occurred.
-    EFAULT
-    */
 
     struct vnode *new;
     int result;
 	char *path;
+    size_t *path_len;
+    int err;
 
-    if (filename == NULL){
-        return EFAULT;
+    path = kmalloc(PATH_MAX);
+    path_len = kmalloc(sizeof(int));
+
+    /* Copy the string from userspace to kernel space and check for valid address */
+    err = copyinstr((const_userptr_t) filename, path, PATH_MAX, path_len);
+
+    if (err){
+        kfree(path);
+        kfree(path_len);
+        return err;
     }
 
-    //if (USERSTACK < (unsigned int) filename && (unsigned int) filename > USERSPACETOP){
-    //    return EBADF;
-    //}
-
-    if ((unsigned int) filename > USERSPACETOP){
-        return EBADF;
-    }
-
-    path = (char *) kstrdup(filename);
+    /* Open the address and discard the kernel space address */
 	result = vfs_open(path, flags, 0, &new);
+
+    kfree(path);
+    kfree(path_len);
 
 	if (result) {
 		return result;
@@ -92,9 +90,10 @@ sys_close(int fd)
 	if(!fd_valid(fd)) {
 		return EBADF;
 	}
-	
+
+    // TODO: Check this is working
 	free_fd(curproc->proc_ft, fd);
-	
+
 	return 0;
 }
 
@@ -279,14 +278,31 @@ Changes the current working directory.
 int
 sys_chdir(const char *pathname)
 {
-    if (pathname == NULL){
-        return EFAULT;
+    char *path;
+    size_t *path_len;
+    int err;
+
+    path = kmalloc(PATH_MAX);
+    path_len = kmalloc(sizeof(int));
+
+    /* Copy the string from userspace to kernel space and check for valid address */
+    err = copyinstr((const_userptr_t) pathname, path, PATH_MAX, path_len);
+
+    if (err){
+        kfree(path);
+        kfree(path_len);
+        return err;
     }
 
 	int result = vfs_chdir((char *) pathname);
+
+    kfree(path);
+    kfree(path_len);
+
 	if (result) {
 		return result;
 	}
+
 	return 0;
 }
 

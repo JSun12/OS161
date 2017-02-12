@@ -47,7 +47,7 @@ ft_init_std(struct ft *ft){
 
     KASSERT(ft != NULL);
 
-    const char * cons = "con:";  // Filepath of console
+    const char * cons = "con:";
 
     if (ft->entries[0] == NULL){
         struct vnode *stdin_v;
@@ -112,28 +112,24 @@ ft_init_std(struct ft *ft){
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 /*
-Returns a -1 if OPEN_MAX files are already open.
+Returns a EMFILE if OPEN_MAX files are already open.
 Otherwise, returns new file descriptor.
 */
 int
-add_entry(struct ft *ft, struct ft_entry *entry)
+add_entry(struct ft *ft, struct ft_entry *entry, int32_t *fd)
 {
     KASSERT(ft != NULL);
     KASSERT(entry != NULL);
 
-    lock_acquire(ft->ft_lock);
-
     for(int i = 3; i < OPEN_MAX; i++){
         if(ft->entries[i] == NULL){
             assign_fd(ft, entry, i);
-            lock_release(ft->ft_lock);
-            return i;
+            *fd = i;
+            return 0;
         }
     }
 
-    lock_release(ft->ft_lock);
-
-    return -1;
+    return EMFILE;
 }
 
 void
@@ -183,25 +179,6 @@ fd_valid(int fd)
     return true;
 }
 
-void
-entry_incref(struct ft_entry *entry)
-{
-    KASSERT(entry != NULL);
-
-    entry->count += 1;
-}
-
-void
-entry_decref(struct ft_entry *entry)
-{
-    KASSERT(entry != NULL);
-
-    entry->count -= 1;
-    if (entry->count == 0){
-        entry_destroy(entry);
-    }
-}
-
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 struct ft_entry *
@@ -237,3 +214,23 @@ entry_destroy(struct ft_entry *entry)
     lock_destroy(entry->entry_lock);
     kfree(entry);
 }
+
+void
+entry_incref(struct ft_entry *entry)
+{
+    KASSERT(entry != NULL);
+
+    entry->count += 1;
+}
+
+void
+entry_decref(struct ft_entry *entry)
+{
+    KASSERT(entry != NULL);
+
+    entry->count -= 1;
+    if (entry->count == 0){
+        entry_destroy(entry);
+    }
+}
+

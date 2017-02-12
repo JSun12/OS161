@@ -5,7 +5,7 @@
 #include <kern/seek.h>
 
 /*
-* User-invoked system calls.
+User-invoked system calls.
 */
 int sys_open(const char *, int, int32_t *);
 int sys_close(int);

@@ -53,9 +53,9 @@ sys_open(const char *filename, int flags, int32_t *output)
 		return ENOMEM;
 	}
 
-    result = add_entry(curproc->proc_ft, entry);
-    if (result < 0){
-        return EMFILE;
+    result = add_entry(curproc->proc_ft, entry, output);
+    if (result){
+        return result;
     }
 
 	if (flags & O_APPEND) {
@@ -75,14 +75,11 @@ sys_open(const char *filename, int flags, int32_t *output)
 
 	entry->rwflags = flags;
 
-    *output = result;
-
     return 0;
 }
 
 /*
-Atomic removal of an entry from the filetable.
-Vfs file is also properly closed.
+Closes the file at fd. Returns EBADF if fd is not used.
 */
 int
 sys_close(int fd)
@@ -91,16 +88,14 @@ sys_close(int fd)
 		return EBADF;
 	}
 
-    // TODO: Check this is working
 	free_fd(curproc->proc_ft, fd);
 
 	return 0;
 }
 
 /*
-Writes up to buflen bytes to the file specified by fd, at the
-location in the file specified by the current seek position of the file,
-taking the data from the space pointed to by buf. The file must be open for writing.
+Writes the data from buf up to buflen bytes to the file at fd, at the
+current seek position. The file must be open for writing.
 */
 int
 sys_write(int fd, const void *buf, size_t nbytes, int32_t *retval0)
@@ -120,10 +115,10 @@ sys_write(int fd, const void *buf, size_t nbytes, int32_t *retval0)
 	}
 
 	iov.iov_ubase = (userptr_t)buf;
-	iov.iov_len = nbytes;		 // length of the memory space
+	iov.iov_len = nbytes;
 	u.uio_iov = &iov;
 	u.uio_iovcnt = 1;
-	u.uio_resid = nbytes;          // amount to write from the file -> Amount left to transfer
+	u.uio_resid = nbytes;
 	u.uio_offset = entry->offset;
 	u.uio_segflg = UIO_USERSPACE;
 	u.uio_rw = UIO_WRITE;
@@ -142,10 +137,8 @@ sys_write(int fd, const void *buf, size_t nbytes, int32_t *retval0)
 }
 
 /*
-Reads up to buflen bytes from the file specified by fd,
-at the location in the file specified by the current seek position
-of the file, and stores them in the space pointed to by buf.
-The file must be open for reading.
+Reads to buf up to buflen bytes from the file at fd,
+at current seek position. The file must be open for reading.
 */
 int
 sys_read(int fd, void *buf, size_t buflen, ssize_t *retval0)
@@ -166,10 +159,10 @@ sys_read(int fd, void *buf, size_t buflen, ssize_t *retval0)
 	}
 
 	iov.iov_ubase = (userptr_t)buf;
-	iov.iov_len = buflen;		 // length of the memory space
+	iov.iov_len = buflen;
 	u.uio_iov = &iov;
 	u.uio_iovcnt = 1;
-	u.uio_resid = buflen;          // amount to read from the file -> Amount left to transfer
+	u.uio_resid = buflen;
 	u.uio_offset = entry->offset;
 	u.uio_segflg = UIO_USERSPACE;
 	u.uio_rw = UIO_READ;
@@ -188,7 +181,7 @@ sys_read(int fd, void *buf, size_t buflen, ssize_t *retval0)
 }
 
 /*
-Sets the files seek position as indicated, according to whence.
+Sets the file's seek position according to pos and whence.
 */
 int
 sys_lseek(int fd, off_t pos, int whence, int32_t *retval0, int32_t *retval1)
@@ -245,9 +238,8 @@ sys_lseek(int fd, off_t pos, int whence, int32_t *retval0, int32_t *retval1)
 }
 
 /*
-Clones the instance of the open file at the old descriptor
-to the new descriptor. If there are open files in the new
-descriptor, they are closed.
+Clones the instance of the open file at oldfd to newfd.
+If there is an open file at newfd, it is closed.
 */
 int
 sys_dup2(int oldfd, int newfd, int *output)
@@ -307,8 +299,7 @@ sys_chdir(const char *pathname)
 }
 
 /*
-Stores the current working directory in the output in the given
-char buf, provides by the user.
+Stores the current working directory at buf.
 */
 int
 sys___getcwd(char *buf, size_t buflen, int32_t *output)
@@ -318,10 +309,10 @@ sys___getcwd(char *buf, size_t buflen, int32_t *output)
 	int result;
 
 	iov.iov_ubase = (userptr_t)buf;
-	iov.iov_len = buflen;		 // length of the memory space
+	iov.iov_len = buflen;
 	u.uio_iov = &iov;
 	u.uio_iovcnt = 1;
-	u.uio_resid = buflen;          // amount to read from the file -> Amount left to transfer
+	u.uio_resid = buflen;
 	u.uio_offset = 0;
 	u.uio_segflg = UIO_USERSPACE;
 	u.uio_rw = UIO_READ;

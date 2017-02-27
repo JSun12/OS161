@@ -54,6 +54,15 @@
 #include "opt-synchprobs.h"
 
 
+// DEBUGGING
+
+#include <spl.h>
+#include <spinlock.h>
+#include <membar.h>
+
+// END DEBUGGING
+
+
 /* Magic number used as a guard value on kernel thread stacks. */
 #define THREAD_STACK_MAGIC 0xbaadf00d
 
@@ -476,10 +485,38 @@ thread_make_runnable(struct thread *target, bool already_have_lock)
 		ipi_send(targetcpu, IPI_UNIDLE);
 	}
 
+
+
+ 	// PASINDU PUT THIS FOR DEBUGGING
+
+	if (!strcmp(target->t_name, "new_thread")) {
+		struct spinlock *splk = &targetcpu->c_runqueue_lock;
+		/* this must work before curcpu initialization */
+		if (CURCPU_EXISTS()) {
+			KASSERT(splk->splk_holder == curcpu->c_self);
+			KASSERT(curcpu->c_spinlocks > 0);
+			curcpu->c_spinlocks--;
+		}	
+
+		splk->splk_holder = NULL;
+		membar_any_store();
+
+		kprintf("here");
+		spllower(IPL_HIGH, IPL_NONE);
+		return;
+		spinlock_data_set(&splk->splk_lock, 0);
+		spllower(IPL_HIGH, IPL_NONE);
+	}
+
+	//END DEBUGGING
+
+
+
+
 	if (!already_have_lock) {
 		spinlock_release(&targetcpu->c_runqueue_lock);
 	}
-}
+}	
 
 /*
  * Create a new thread based on an existing one.
@@ -542,7 +579,7 @@ thread_fork(const char *name,
 	switchframe_init(newthread, entrypoint, data1, data2);
 
 	/* Lock the current cpu's run queue and make the new thread runnable */
-	thread_make_runnable(newthread, false);
+	thread_make_runnable(newthread, false);	
 
 	return 0;
 }

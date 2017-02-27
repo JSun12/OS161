@@ -49,6 +49,8 @@
 #include <addrspace.h>
 #include <filetable.h>
 
+#include <kern/errno.h>
+#include <machine/trapframe.h>
 
 /*
  * The process for the kernel; this holds all the kernel-only threads.
@@ -89,7 +91,6 @@ proc_create(const char *name)
 
 	/* VFS fields */
 	proc->p_cwd = NULL;
-
 
 	return proc;
 }
@@ -219,6 +220,21 @@ proc_create_runprogram(const char *name)
 		kfree(newproc);
 		return NULL;
 	}	
+
+	newproc->pid_lock = lock_create("new_lock");
+	if (newproc->pid_lock == NULL) {
+		kfree(newproc); 
+		return NULL;
+	}
+
+	struct proc *pid_array[PID_MAX];
+	for (int i = 0; i < PID_MAX; i++) {
+		pid_array[i] = NULL;
+	}
+
+	newproc->pid_array = pid_array;
+	newproc->pid_array[0] = newproc; 
+	newproc->pid = 0; 
 
 	/* VM fields */
 
@@ -351,4 +367,90 @@ proc_setas(struct addrspace *newas)
 	proc->p_addrspace = newas;
 	spinlock_release(&proc->p_lock);
 	return oldas;
+}
+
+
+int
+sys_fork(struct trapframe *tf, int32_t *retval0)
+{
+	struct proc *new_proc; 
+	struct trapframe *new_tf;
+	int result;
+
+	new_proc = proc_create("new_proc");
+	if (new_proc == NULL) {
+		return ENOMEM;
+	}
+
+	new_tf = kmalloc(sizeof(struct trapframe));
+	if (new_tf == NULL) {
+		kfree(new_proc); 
+		return ENOMEM;
+	}
+
+	result = as_copy(curproc->p_addrspace, &new_proc->p_addrspace);
+	if (result) {
+		return result;
+	}
+
+	new_proc->pid_lock = curproc->pid_lock;
+	new_proc->pid_array = curproc->pid_array;
+
+	result = assign_pid(new_proc, retval0);
+	if (result) {
+		return result;
+	}
+
+	ft_copy(curproc->proc_ft, new_proc->proc_ft);
+
+	memcpy((void *) new_tf, (const void *) tf, sizeof(struct trapframe));
+	new_tf->tf_v0 = 0; 
+
+	result = thread_fork("new_thread", new_proc, &enter_usermode, new_tf, 1);
+	if (result) {
+		return result;
+	}
+
+	return 0;
+
+	// kprintf("here");
+}
+
+int
+sys_getpid(int32_t *retval0)
+{
+	*retval0 = curproc->pid;
+	return 0;
+}
+
+int
+assign_pid(struct proc *new_proc, int32_t *retval0)
+{
+	lock_acquire(new_proc->pid_lock);
+
+	for (int i = 0; i < PID_MAX; i++){
+		if (new_proc->pid_array[i] != NULL) {
+			continue;
+		}
+		new_proc->pid_array[i] = new_proc;
+		new_proc->pid = i;
+		*retval0 = (int32_t) i;
+
+		lock_release(new_proc->pid_lock);
+		return 0; 
+	}
+
+	lock_release(new_proc->pid_lock);
+	return -1;
+}
+
+void
+enter_usermode(void *data1, unsigned long data2)
+{
+	(void) data2; 
+	void *tf = curthread->t_stack + STACK_SIZE - sizeof(struct trapframe) - 1;
+
+	memcpy(tf, (const void *) data1, sizeof(struct trapframe));
+	as_activate();
+	mips_usermode(tf);
 }

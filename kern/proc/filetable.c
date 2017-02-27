@@ -179,6 +179,32 @@ fd_valid(int fd)
     return true;
 }
 
+/*
+The new_ft is still being created, so we don't need to acquire it's lock.
+*/
+void
+ft_copy(struct ft *old_ft, struct ft *new_ft)
+{
+    lock_acquire(old_ft->ft_lock);
+
+    for (int i = 0; i < OPEN_MAX; i++) {
+        struct ft_entry *entry; 
+        entry = old_ft->entries[i]; 
+
+        if (entry == NULL) {
+            continue;
+        }
+        
+        lock_acquire(entry->entry_lock);
+        entry->count += 1;
+        lock_release(entry->entry_lock);
+
+        new_ft->entries[i] = entry;
+    }
+
+    lock_release(old_ft->ft_lock);
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 struct ft_entry *

@@ -39,6 +39,7 @@
 #include <spinlock.h>
 #include <thread.h> /* required for struct threadarray */
 #include <filetable.h>
+#include <machine/trapframe.h>
 
 
 /*
@@ -48,13 +49,17 @@ struct proc {
 	char *p_name;			/* Name of this process */
 	struct spinlock p_lock;		/* Lock for this structure */
 	struct threadarray p_threads;	/* Threads in this process */
+	
+	/* Pid structures */
+	struct lock *pid_lock;
+	struct proc **pid_array; 
+	pid_t pid; 
 
 	/* VM */
 	struct addrspace *p_addrspace;	/* virtual address space */
 
 	/* VFS */
 	struct vnode *p_cwd;		/* current working directory */
-
 	struct ft *proc_ft;
 };
 
@@ -81,6 +86,14 @@ struct addrspace *proc_getas(void);
 
 /* Change the address space of the current process, and return the old one. */
 struct addrspace *proc_setas(struct addrspace *);
+
+
+/* Process syscalls */
+int sys_fork(struct trapframe *, int32_t *);
+int sys_getpid(int32_t *);
+int assign_pid(struct proc *, int32_t *);
+void enter_usermode(void *, unsigned long);
+
 
 
 #endif /* _PROC_H_ */

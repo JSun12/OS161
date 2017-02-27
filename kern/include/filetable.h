@@ -35,6 +35,7 @@ void assign_fd(struct ft *, struct ft_entry *, int);
 void free_fd(struct ft *, int);
 bool fd_valid_and_used(struct ft *, int);
 bool fd_valid(int);
+void ft_copy(struct ft *, struct ft *);
 
 struct ft_entry *entry_create(struct vnode *);
 void entry_destroy(struct ft_entry *);

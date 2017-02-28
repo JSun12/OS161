@@ -19,7 +19,6 @@ Opens the given file for reading with the given flags.
 int
 sys_open(const char *filename, int flags, int32_t *output)
 {
-
     struct vnode *new;
     int result;
 	char *path;
@@ -147,7 +146,6 @@ sys_read(int fd, void *buf, size_t buflen, ssize_t *retval0)
 	if (!fd_valid_and_used(curproc->proc_ft, fd)) {
 		return EBADF;
 	}
-
 
     struct iovec iov;
 	struct uio u;

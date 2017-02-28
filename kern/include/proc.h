@@ -49,11 +49,7 @@ struct proc {
 	char *p_name;			/* Name of this process */
 	struct spinlock p_lock;		/* Lock for this structure */
 	struct threadarray p_threads;	/* Threads in this process */
-	
-	/* Pid structures */
-	struct lock *pid_lock;
-	struct proc **pid_array; 
-	pid_t pid; 
+	pid_t pid;  /* Process id */
 
 	/* VM */
 	struct addrspace *p_addrspace;	/* virtual address space */
@@ -62,6 +58,18 @@ struct proc {
 	struct vnode *p_cwd;		/* current working directory */
 	struct ft *proc_ft;
 };
+
+struct pidtable {
+	struct lock *pid_lock;
+	struct cv *pid_cv;  /* To allow for processes to sleep on waitpid */
+	struct proc **pid_array;
+};
+
+/* Initializes the pid table*/
+void pidtable_bootstrap(void);
+int pidtable_add(struct proc *);
+int pidtable_remove(struct proc *);
+int pidtable_find(struct proc *);
 
 /* This is the process structure for the kernel and for kernel-only threads. */
 extern struct proc *kproc;
@@ -91,7 +99,7 @@ struct addrspace *proc_setas(struct addrspace *);
 /* Process syscalls */
 int sys_fork(struct trapframe *, int32_t *);
 int sys_getpid(int32_t *);
-int assign_pid(struct proc *, int32_t *);
+//int assign_pid(struct proc *, int32_t *);
 void enter_usermode(void *, unsigned long);
 
 

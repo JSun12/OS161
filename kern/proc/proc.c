@@ -48,7 +48,7 @@
 #include <current.h>
 #include <addrspace.h>
 #include <filetable.h>
-
+#include <limits.h>
 #include <kern/errno.h>
 #include <machine/trapframe.h>
 #include <cpu.h>
@@ -59,6 +59,10 @@
  */
 struct proc *kproc;
 
+/*
+ * The PID table accessible by all processes.
+ */
+static struct pidtable *pidtable;
 
 /*
  * Create a proc structure.
@@ -81,10 +85,10 @@ proc_create(const char *name)
 	proc->proc_ft = ft_create();
 	if (proc->proc_ft == NULL) {
 		kfree(proc->p_name);
-		kfree(proc); 
+		kfree(proc);
 		return NULL;
 	}
-	
+
 	threadarray_init(&proc->p_threads);
 	spinlock_init(&proc->p_lock);
 
@@ -221,22 +225,23 @@ proc_create_runprogram(const char *name)
 	if (ret) {
 		kfree(newproc);
 		return NULL;
-	}	
-
-	newproc->pid_lock = lock_create("new_lock");
-	if (newproc->pid_lock == NULL) {
-		kfree(newproc); 
-		return NULL;
 	}
 
+	//newproc->pid_lock = lock_create("new_lock");
+	//if (newproc->pid_lock == NULL) {
+	//	kfree(newproc);
+	//	return NULL;
+	//}
+	/*
 	struct proc *pid_array[PID_MAX];
 	for (int i = 0; i < PID_MAX; i++) {
 		pid_array[i] = NULL;
 	}
 
 	newproc->pid_array = pid_array;
-	newproc->pid_array[0] = newproc; 
-	newproc->pid = 1; 
+	newproc->pid_array[0] = newproc;
+	*/
+	newproc->pid = 1;
 
 	/* VM fields */
 
@@ -375,7 +380,7 @@ proc_setas(struct addrspace *newas)
 int
 sys_fork(struct trapframe *tf, int32_t *retval0)
 {
-	struct proc *new_proc; 
+	struct proc *new_proc;
 	struct trapframe *new_tf;
 	int result;
 
@@ -386,7 +391,7 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 
 	new_tf = kmalloc(sizeof(struct trapframe));
 	if (new_tf == NULL) {
-		kfree(new_proc); 
+		kfree(new_proc);
 		return ENOMEM;
 	}
 
@@ -402,13 +407,15 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 	}
 	spinlock_release(&curproc->p_lock);
 
-	new_proc->pid_lock = curproc->pid_lock;
-	new_proc->pid_array = curproc->pid_array;
+	//new_proc->pid_lock = curproc->pid_lock;
+	//new_proc->pid_array = curproc->pid_array;
 
-	result = assign_pid(new_proc, retval0);
-	if (result) {
-		return result;
+	new_proc->pid = pidtable_add(new_proc);
+	if(new_proc->pid == -1){
+		return ENPROC;
 	}
+	*retval0 = new_proc->pid;
+	//TODO: clean up if this fails
 
 	ft_copy(curproc->proc_ft, new_proc->proc_ft);
 
@@ -429,13 +436,101 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 	// kprintf("here");
 }
 
+void
+pidtable_bootstrap()
+{
+	pidtable = kmalloc(sizeof(struct pidtable));
+	if (pidtable == NULL) {
+		panic("Unable to initialize PID table.\n");
+	}
+
+	pidtable->pid_lock = lock_create("pidtable lock");
+	if (pidtable->pid_lock == NULL) {
+		panic("Unable to intialize PID table's lock.\n");
+	}
+
+	pidtable->pid_cv = cv_create("pidtable cv");
+	if (pidtable->pid_lock == NULL) {
+		panic("Unable to intialize PID table's cv.\n");
+	}
+
+	pidtable->pid_array = kmalloc(PID_MAX * sizeof(struct proc));
+	if (pidtable->pid_array == NULL) {
+		panic("Unable to initialize PID array.\n");
+	}
+
+	/* Populate the initial PID table with NULL references*/
+	for (int i = 0; i < PID_MAX; i++){
+		pidtable->pid_array[i] = NULL;
+	}
+}
+
+int
+pidtable_add(struct proc *proc)
+{
+	int pos;
+
+	pos = -1; /* Error condition */
+
+	lock_acquire(pidtable->pid_lock);
+	for (int i = 0; i < PID_MAX; i++){
+		if (pidtable->pid_array[i] == NULL){
+			pos = i;
+			pidtable->pid_array[i] = proc;
+			break;
+		}
+	}
+	lock_release(pidtable->pid_lock);
+
+	return pos;
+}
+int
+pidtable_find(struct proc *proc)
+{
+	int pos;
+
+	pos = -1; /* Error condition */
+
+	lock_acquire(pidtable->pid_lock);
+	for (int i = 0; i < PID_MAX; i++){
+		if (pidtable->pid_array[i] == proc){
+			pos = i;
+			break;
+		}
+	}
+	lock_release(pidtable->pid_lock);
+
+	return pos;
+}
+
+int
+pidtable_remove(struct proc *proc)
+{
+	int pos;
+
+	pos = -1; /* Error condition: Proc not in PID table*/
+
+	lock_acquire(pidtable->pid_lock);
+	for (int i = 0; i < PID_MAX; i++){
+		if (pidtable->pid_array[i] == proc){
+			pos = i;
+			pidtable->pid_array[i] = NULL;
+			break;
+		}
+	}
+	lock_release(pidtable->pid_lock);
+
+	return pos;
+}
+
+
 int
 sys_getpid(int32_t *retval0)
 {
-	*retval0 = curproc->pid;
+	*retval0 = pidtable_find(curproc);
 	return 0;
 }
-
+/*
 int
 assign_pid(struct proc *new_proc, int32_t *retval0)
 {
@@ -450,17 +545,17 @@ assign_pid(struct proc *new_proc, int32_t *retval0)
 		*retval0 = (int32_t) i;
 
 		lock_release(new_proc->pid_lock);
-		return 0; 
+		return 0;
 	}
 
 	lock_release(new_proc->pid_lock);
 	return -1;
 }
-
+*/
 void
 enter_usermode(void *data1, unsigned long data2)
 {
-	(void) data2; 
+	(void) data2;
 	void *tf = (void *) curthread->t_stack + 16;
 
 	memcpy(tf, (const void *) data1, sizeof(struct trapframe));

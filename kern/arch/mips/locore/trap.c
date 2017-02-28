@@ -399,7 +399,7 @@ mips_usermode(struct trapframe *tf)
 
 	/*
 	 * This actually does it. See exception-*.S.
-	 */
+	 */	
 	asm_usermode(tf);
 }
 

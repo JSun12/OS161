@@ -51,6 +51,8 @@
 
 #include <kern/errno.h>
 #include <machine/trapframe.h>
+#include <cpu.h>
+
 
 /*
  * The process for the kernel; this holds all the kernel-only threads.
@@ -234,7 +236,7 @@ proc_create_runprogram(const char *name)
 
 	newproc->pid_array = pid_array;
 	newproc->pid_array[0] = newproc; 
-	newproc->pid = 0; 
+	newproc->pid = 1; 
 
 	/* VM fields */
 
@@ -393,6 +395,13 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 		return result;
 	}
 
+	spinlock_acquire(&curproc->p_lock);
+	if (curproc->p_cwd != NULL) {
+		VOP_INCREF(curproc->p_cwd);
+		new_proc->p_cwd = curproc->p_cwd;
+	}
+	spinlock_release(&curproc->p_lock);
+
 	new_proc->pid_lock = curproc->pid_lock;
 	new_proc->pid_array = curproc->pid_array;
 
@@ -404,9 +413,13 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 	ft_copy(curproc->proc_ft, new_proc->proc_ft);
 
 	memcpy((void *) new_tf, (const void *) tf, sizeof(struct trapframe));
-	new_tf->tf_v0 = 0; 
+	new_tf->tf_v0 = 0;
+	new_tf->tf_epc += 4;
+	tf->tf_v0 = 0;
+	tf->tf_v1 = 0;
+	tf->tf_a3 = 0;      /* signal no error */
 
-	result = thread_fork("new_thread", new_proc, &enter_usermode, new_tf, 1);
+	result = thread_fork("new_thread", new_proc, enter_usermode, new_tf, 1);
 	if (result) {
 		return result;
 	}
@@ -433,7 +446,7 @@ assign_pid(struct proc *new_proc, int32_t *retval0)
 			continue;
 		}
 		new_proc->pid_array[i] = new_proc;
-		new_proc->pid = i;
+		new_proc->pid = i+1;
 		*retval0 = (int32_t) i;
 
 		lock_release(new_proc->pid_lock);
@@ -448,7 +461,7 @@ void
 enter_usermode(void *data1, unsigned long data2)
 {
 	(void) data2; 
-	void *tf = curthread->t_stack + STACK_SIZE - sizeof(struct trapframe) - 1;
+	void *tf = (void *) curthread->t_stack + 16;
 
 	memcpy(tf, (const void *) data1, sizeof(struct trapframe));
 	as_activate();

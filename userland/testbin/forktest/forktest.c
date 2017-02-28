@@ -56,7 +56,7 @@ int
 dofork(void)
 {
 	int pid;
-	pid = fork();
+	pid = fork();	
 	if (pid < 0) {
 		warn("fork");
 	}
@@ -154,16 +154,20 @@ test(int nowait)
 	putchar('3');
 	check();
 
+	while(1){};
 	/*
 	 * These must be called in reverse order to avoid waiting
 	 * improperly.
 	 */
-	dowait(nowait, pid3);
-	dowait(nowait, pid2);
-	dowait(nowait, pid1);
-	dowait(nowait, pid0);
 
-	putchar('\n');
+	if (1 == 0) {
+		dowait(nowait, pid3);
+		dowait(nowait, pid2);
+		dowait(nowait, pid1);
+		dowait(nowait, pid0);
+
+		putchar('\n');
+	}
 }
 
 int

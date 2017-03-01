@@ -98,6 +98,9 @@ proc_create(const char *name)
 	/* VFS fields */
 	proc->p_cwd = NULL;
 
+	/* PID fields */
+	proc->pid = (int) NULL;
+
 	return proc;
 }
 
@@ -241,7 +244,7 @@ proc_create_runprogram(const char *name)
 	newproc->pid_array = pid_array;
 	newproc->pid_array[0] = newproc;
 	*/
-	newproc->pid = 1;
+	newproc->pid = (int) NULL;
 
 	/* VM fields */
 
@@ -463,6 +466,9 @@ pidtable_bootstrap()
 	for (int i = 0; i < PID_MAX; i++){
 		pidtable->pid_array[i] = NULL;
 	}
+
+	/* Add the kernel's process as entry 0 */
+	kproc->pid = pidtable_add(kproc);
 }
 
 int
@@ -558,6 +564,7 @@ enter_usermode(void *data1, unsigned long data2)
 	(void) data2;
 	void *tf = (void *) curthread->t_stack + 16;
 
+	//TODO: FREE DATA1 I think?
 	memcpy(tf, (const void *) data1, sizeof(struct trapframe));
 	as_activate();
 	mips_usermode(tf);

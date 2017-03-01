@@ -142,8 +142,6 @@ common_prog(int nargs, char **args)
 	 * once you write the code for handling that.
 	 */
 
-	 while(1){}
-
 	return 0;
 }
 

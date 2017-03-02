@@ -63,7 +63,7 @@ struct proc {
 
 	/* PID */
 	pid_t pid;  /* Process id */
-	//struct array *children;
+	struct array *children;
 
 	/* VM */
 	struct addrspace *p_addrspace;	/* virtual address space */
@@ -77,17 +77,17 @@ struct pidtable {
 	struct lock *pid_lock;
 	struct cv *pid_cv;  /* To allow for processes to sleep on waitpid */
 	struct proc *pid_procs[PID_MAX+1]; /* Array to hold processes */
-	//int pid_status[PID_MAX+1]; /* Array to hold process statuses */
-	//int pid_waitcode[PID_MAX+1]; /* Array to hold the wait codes*/
-	//int pid_available;  /* Number of available pid spaces */
-	//int pid_next; /* Lowest free PID */
+	int pid_status[PID_MAX+1]; /* Array to hold process statuses */
+	int pid_waitcode[PID_MAX+1]; /* Array to hold the wait codes*/
+	int pid_available;  /* Number of available pid spaces */
+	int pid_next; /* Lowest free PID */
 };
 
 /* Initializes the pid table*/
 void pidtable_bootstrap(void);
 int pidtable_find(struct proc *);
 int pidtable_add(struct proc *);
-void pidtable_remove(struct proc *);
+void pidtable_remove(struct proc *, int32_t);
 
 /* This is the process structure for the kernel and for kernel-only threads. */
 extern struct proc *kproc;
@@ -118,6 +118,7 @@ struct addrspace *proc_setas(struct addrspace *);
 int sys_fork(struct trapframe *, int32_t *);
 int sys_getpid(int32_t *);
 int sys_waitpid(int32_t *);
+int sys__exit(int32_t);
 //int assign_pid(struct proc *, int32_t *);
 void enter_usermode(void *, unsigned long);
 

@@ -88,14 +88,14 @@ proc_create(const char *name)
 		kfree(proc);
 		return NULL;
 	}
-	/*
+
 	proc->children = array_create();
 	if (proc->children == NULL) {
 		kfree(proc->proc_ft);
 		kfree(proc->p_name);
 		kfree(proc);
 		return NULL;
-	}*/
+	}
 
 	threadarray_init(&proc->p_threads);
 	spinlock_init(&proc->p_lock);
@@ -406,7 +406,7 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 	*retval0 = new_proc->pid;
 	//TODO: clean up if this fails
 	//int *test;  //TODO: Remove this shit
-	//array_add(curproc->children, &new_proc->pid, NULL); //XXX: Can we put in a pid properly like this?
+	array_add(curproc->children, &new_proc->pid, NULL); //XXX: Can we put in a pid properly like this?
 
 	ft_copy(curproc->proc_ft, new_proc->proc_ft);
 
@@ -445,26 +445,23 @@ pidtable_bootstrap()
 	}
 
 	/* Set the starting constants */
-	//pidtable->pid_procs[kproc->pid] = kproc;
-	//pidtable->pid_status[kproc->pid] = RUNNING;
-	//pidtable->pid_waitcode[kproc->pid] = (int) NULL;
-	//pidtable->pid_available = PID_MAX - 1;
-	//pidtable->pid_next = PID_MIN;
+	pidtable->pid_procs[kproc->pid] = kproc;
+	pidtable->pid_status[kproc->pid] = RUNNING;
+	pidtable->pid_waitcode[kproc->pid] = (int) NULL;
+	pidtable->pid_available = PID_MAX - 1;
+	pidtable->pid_next = PID_MIN;
 
 	/* Populate the initial PID stats array with ready status */
-	//for (int i = PID_MIN; i < PID_MAX; i++){
-		//pidtable->pid_procs[i] = NULL;
-		//pidtable->pid_status[i] = READY;
-		//pidtable->pid_waitcode[i] = (int) NULL;
-	//}
+	for (int i = PID_MIN; i < PID_MAX; i++){
+		pidtable->pid_procs[i] = NULL;
+		pidtable->pid_status[i] = READY;
+		pidtable->pid_waitcode[i] = (int) NULL;
+	}
 }
 
 int
 pidtable_add(struct proc *proc)
 {
-	(void) proc;
-	return 1;
-	/*
 	int output;
 	int next;
 
@@ -474,6 +471,7 @@ pidtable_add(struct proc *proc)
 		next = pidtable->pid_next;
 		pidtable->pid_procs[next] = proc;
 		pidtable->pid_status[next] = RUNNING;
+		pidtable->pid_waitcode[next] = (int) NULL;
 		pidtable->pid_available--;
 		output = next;
 
@@ -496,41 +494,70 @@ pidtable_add(struct proc *proc)
 
 	lock_release(pidtable->pid_lock);
 
-	return output;*/
+	return output;
 }
 
 int
 pidtable_find(struct proc *proc)
 {
-	(void) proc;
-	return 1;//proc->pid;
+	return proc->pid;
 }
-/*
-void
-pidtable_remove(struct proc *proc)
-{
 
+void
+pidtable_remove(struct proc *proc, int32_t waitcode)
+{
+	//TODO: Orphan children of a parent
 	lock_acquire(pidtable->pid_lock);
 
+	/* Begin by orphaning all children */
+	int num_child = array_num(proc->children);
+	for(int i = 0; i < num_child; i++){
+		struct proc *child = array_get(proc->children, i);
+		int child_pid = child->pid;
+		/* Signal to the child we don't need it anymore */
+		if(pidtable->pid_status[child_pid] == RUNNING){
+			pidtable->pid_status[child_pid] = ORPHAN;
+		}
+		/* If the child isn't running, it's a zombie. Remove it here*/
+		else{
+			pidtable->pid_available++;
+			pidtable->pid_procs[child_pid] = NULL;
+			pidtable->pid_status[child_pid] = READY;
+			pidtable->pid_waitcode[child_pid] = (int) NULL;
+			proc_destroy(child);
+		}
+
+	}
+
+	/*
+	* Now update the status of the given process.
+	*/
+
+	/* Case: Signal the parent that the child ended with waitcode given. */
 	if(pidtable->pid_status[proc->pid] == RUNNING){
 		pidtable->pid_status[proc->pid] = ZOMBIE;
+		pidtable->pid_waitcode[proc->pid] = waitcode;
 	}
+	/* Case: Parent already exited. Reset the current pidtable spot for later use. */
 	else if(pidtable->pid_status[proc->pid] == ORPHAN){
 		pidtable->pid_available++;
 		pidtable->pid_procs[proc->pid] = NULL;
 		pidtable->pid_status[proc->pid] = READY;
+		pidtable->pid_waitcode[proc->pid] = (int) NULL;
+		proc_destroy(proc);
 	}
 	else{
 		panic("Tried to remove a bad process.\n");
 	}
 
+	/* Broadcast to any waiting processes. There is no guarentee that the processes on the cv are waiting for us */
 	cv_broadcast(pidtable->pid_cv,pidtable->pid_lock);
 
 	lock_release(pidtable->pid_lock);
 
 	return;
 }
-*/
+
 int
 sys_getpid(int32_t *retval0)
 {
@@ -543,6 +570,13 @@ sys_waitpid(int32_t *retval0)
 {
 	panic("LOLLLLL");
 	*retval0 = pidtable_find(curproc);
+	return 0;
+}
+
+int
+sys__exit(int32_t waitcode)
+{
+	pidtable_remove(curproc, waitcode);
 	return 0;
 }
 

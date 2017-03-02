@@ -41,6 +41,16 @@
 #include <filetable.h>
 #include <machine/trapframe.h>
 
+/*
+* Table index status for pidtable
+*/
+#define READY 0     /* Index available for process */
+#define RUNNING 1   /* Process running */
+#define ZOMBIE 2    /* Process waiting to be reaped */
+#define ORPHAN 3    /* Process running and parent exited */
+
+/* Identifier for pid_next */
+#define NONEXT 0
 
 /*
  * Process structure.
@@ -62,7 +72,11 @@ struct proc {
 struct pidtable {
 	struct lock *pid_lock;
 	struct cv *pid_cv;  /* To allow for processes to sleep on waitpid */
-	struct proc **pid_array;
+	struct array *pid_procs;
+	struct array *pid_stats;
+	int pid_numready;  /* Number of available pid spaces */
+	int pid_next; /* Lowest free PID */
+	int pid_tablesize; /* Size of the table currently */
 };
 
 /* Initializes the pid table*/

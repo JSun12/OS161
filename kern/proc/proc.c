@@ -60,9 +60,12 @@
 struct proc *kproc;
 
 /*
- * The PID table accessible by all processes.
+ * The PID table accessible by all processes and global statuses for table
  */
 static struct pidtable *pidtable;
+int *ready;
+int *running;
+int *zombie;
 
 /*
  * Create a proc structure.
@@ -99,12 +102,10 @@ proc_create(const char *name)
 	proc->p_cwd = NULL;
 
 	/* PID fields */
-	proc->pid = (int) NULL;
+	proc->pid = 1;  /* The kernel thread is defined to be 1 */
 
 	return proc;
 }
-
-
 
 /*
  * Destroy a proc structure.
@@ -442,6 +443,18 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 void
 pidtable_bootstrap()
 {
+	int result;
+
+	/* Set up the running status variables */
+	running = kmalloc(sizeof(int));
+	ready = kmalloc(sizeof(int));
+	zombie = kmalloc(sizeof(int));
+
+	*running = RUNNING;
+	*ready = READY;
+	*zombie = ZOMBIE;
+
+	/* Set up the pidtables */
 	pidtable = kmalloc(sizeof(struct pidtable));
 	if (pidtable == NULL) {
 		panic("Unable to initialize PID table.\n");
@@ -457,53 +470,104 @@ pidtable_bootstrap()
 		panic("Unable to intialize PID table's cv.\n");
 	}
 
-	pidtable->pid_array = kmalloc(PID_MAX * sizeof(struct proc));
-	if (pidtable->pid_array == NULL) {
-		panic("Unable to initialize PID array.\n");
+	pidtable->pid_procs = array_create();
+	if (pidtable->pid_procs == NULL) {
+		panic("Unable to initialize PID process array.\n");
 	}
 
-	/* Populate the initial PID table with NULL references*/
-	for (int i = 0; i < PID_MAX; i++){
-		pidtable->pid_array[i] = NULL;
+	/* Preallocate PID_MAX + 1 spots. Index with pid value, which is 1-based. Thus we need PID_MAX + 1.*/
+	result = array_preallocate(pidtable->pid_procs, PID_MAX + 1);
+	if (result) {
+		panic("Unable to preallocate PID process array.\n");
+	}
+	array_setsize(pidtable->pid_procs, PID_MAX + 1);
+
+	pidtable->pid_stats = array_create();
+	if (pidtable->pid_stats == NULL) {
+		panic("Unable to initialize PID stats array.\n");
+	}
+	array_setsize(pidtable->pid_stats, PID_MAX + 1);
+
+	result = array_preallocate(pidtable->pid_stats, PID_MAX + 1);
+	if (result) {
+		panic("Unable to preallocate PID stats array.\n");
 	}
 
-	/* Add the kernel's process as entry 0 */
-	kproc->pid = pidtable_add(kproc);
+	/* Set the starting constants */
+	array_set(pidtable->pid_stats, kproc->pid, running);  // The kernel's PID is 1, thus 1 will be taken
+	pidtable->pid_numready = PID_MAX - 1;
+	pidtable->pid_next = PID_MIN;
+	pidtable->pid_tablesize = PID_MAX;
+
+	/* Populate the initial PID stats array with ready status */
+	for (int i = PID_MIN; i < PID_MAX; i++){
+		array_set(pidtable->pid_stats, i, ready);
+	}
 }
 
 int
 pidtable_add(struct proc *proc)
 {
-	int pos;
+	int output;
+	int next;
 
-	pos = -1; /* Error condition */
+	next = pidtable->pid_next;
 
 	lock_acquire(pidtable->pid_lock);
-	for (int i = 0; i < PID_MAX; i++){
-		if (pidtable->pid_array[i] == NULL){
-			pos = i;
-			pidtable->pid_array[i] = proc;
-			break;
+	/* Case: Ready PID that already is in the table */
+	if(pidtable->pid_numready > 0)
+	{
+		next = pidtable->pid_next;
+		/* Check to see if we can fit the new PID into the existing table */
+	 	if(pidtable->pid_tablesize >= next){
+			array_set(pidtable->pid_procs, next, proc);
+			array_set(pidtable->pid_stats, next, running);
+			output = next;
+		}
+		else{
+			array_add(pidtable->pid_procs, proc, (unsigned int *) &output);
+			array_add(pidtable->pid_stats, running, (unsigned int *) &output);
+		}
+
+		/* If the table has at least 1 more ready, try to find it starting from next -> end */
+		pidtable->pid_numready = pidtable->pid_numready - 1;
+
+		if(pidtable->pid_numready > 0){
+			for (int i = next + 1; i < pidtable->pid_tablesize; i++){
+				if (array_get(pidtable->pid_stats, i) == ready){
+					pidtable->pid_next = i;
+					break;
+				}
+			}
+			/* If it could not be found, signal that it's to be put at size + 1 */
+			if (pidtable->pid_next == next){
+				pidtable->pid_next = pidtable->pid_tablesize + 1;
+			}
+		}
+		/* If we cannot add any new pids */
+		else{
+			pidtable->pid_next = NONEXT;
 		}
 	}
+	else
+	{
+		panic("Return that we cannot add more stuff. TODO: Return normal error.\n");
+	}
+
 	lock_release(pidtable->pid_lock);
 
-	return pos;
+	return next;
 }
 int
 pidtable_find(struct proc *proc)
 {
 	int pos;
 
+	(void) proc;
 	pos = -1; /* Error condition */
 
 	lock_acquire(pidtable->pid_lock);
-	for (int i = 0; i < PID_MAX; i++){
-		if (pidtable->pid_array[i] == proc){
-			pos = i;
-			break;
-		}
-	}
+
 	lock_release(pidtable->pid_lock);
 
 	return pos;
@@ -517,13 +581,7 @@ pidtable_remove(struct proc *proc)
 	pos = -1; /* Error condition: Proc not in PID table*/
 
 	lock_acquire(pidtable->pid_lock);
-	for (int i = 0; i < PID_MAX; i++){
-		if (pidtable->pid_array[i] == proc){
-			pos = i;
-			pidtable->pid_array[i] = NULL;
-			break;
-		}
-	}
+	(void) proc;
 	lock_release(pidtable->pid_lock);
 
 	return pos;

@@ -53,6 +53,14 @@
 #include <machine/trapframe.h>
 #include <cpu.h>
 
+#include <kern/fcntl.h>
+#include <lib.h>
+#include <vm.h>
+#include <vfs.h>
+#include <syscall.h>
+#include <test.h>
+
+#include <copyinout.h>
 
 /*
  * The process for the kernel; this holds all the kernel-only threads.
@@ -372,6 +380,9 @@ proc_setas(struct addrspace *newas)
 }
 
 
+/*
+TODO: set address spaces, properly
+*/
 int
 sys_fork(struct trapframe *tf, int32_t *retval0)
 {
@@ -410,14 +421,16 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 		return result;
 	}
 
-	ft_copy(curproc->proc_ft, new_proc->proc_ft);
+	struct ft *ft = curproc->proc_ft;
+	lock_acquire(ft->ft_lock);
+	ft_copy(ft, new_proc->proc_ft);
+	lock_release(ft->ft_lock);
 
 	memcpy((void *) new_tf, (const void *) tf, sizeof(struct trapframe));
 	new_tf->tf_v0 = 0;
+	new_tf->tf_v1 = 0;
+	new_tf->tf_a3 = 0;      /* signal no error */
 	new_tf->tf_epc += 4;
-	tf->tf_v0 = 0;
-	tf->tf_v1 = 0;
-	tf->tf_a3 = 0;      /* signal no error */
 
 	result = thread_fork("new_thread", new_proc, enter_usermode, new_tf, 1);
 	if (result) {
@@ -457,6 +470,7 @@ assign_pid(struct proc *new_proc, int32_t *retval0)
 	return -1;
 }
 
+// make sure to free the trapframe in the heap.
 void
 enter_usermode(void *data1, unsigned long data2)
 {
@@ -466,4 +480,84 @@ enter_usermode(void *data1, unsigned long data2)
 	memcpy(tf, (const void *) data1, sizeof(struct trapframe));
 	as_activate();
 	mips_usermode(tf);
+}
+
+
+int
+sys_execv(const char *prog, char **args)
+{
+	// kprintf("%s\n", args[1]);
+	// kprintf("hello\n");
+
+	char *progname;
+	size_t *path_len;
+	progname = kmalloc(PATH_MAX);
+    path_len = kmalloc(sizeof(int));
+	copyinstr((const_userptr_t) prog, progname, PATH_MAX, path_len);
+	kprintf("%s\n", progname);
+
+	int i = 0; 
+	while(args[i] != NULL) i++;
+	int argc = i -1;
+
+	struct addrspace *as;	
+
+	// threadarray_cleanup(&proc->p_threads);
+	// threadarray_init(&proc->p_threads);
+	as = proc_setas(NULL);
+	as_deactivate();
+	as_destroy(as);
+	
+	struct vnode *v;
+	vaddr_t entrypoint, stackptr;
+	int result;
+	
+	/* Open the file. */
+	result = vfs_open(progname, O_RDONLY, 0, &v);
+	if (result) {
+		return result;
+	}
+
+	/* We should be a new process. */
+	KASSERT(proc_getas() == NULL);
+
+	/* Create a new address space. */
+	as = as_create();
+	if (as == NULL) {
+		vfs_close(v);
+		return ENOMEM;
+	}
+	// kprintf("hello\n");
+	// kprintf("%s\n", args[0]);
+
+	/* Switch to it and activate it. */
+	proc_setas(as);
+	as_activate();	
+
+	/* Load the executable. */
+	result = load_elf(v, &entrypoint);
+	if (result) {
+		/* p_addrspace will go away when curproc is destroyed */
+		vfs_close(v);
+		return result;
+	}
+
+	/* Done with the file now. */
+	vfs_close(v);
+
+	/* Define the user stack in the address space */
+	result = as_define_stack(as, &stackptr);
+	if (result) {
+		/* p_addrspace will go away when curproc is destroyed */
+		return result;
+	}	
+
+	/* Warp to user mode. */
+	enter_new_process(argc, (userptr_t) args,
+			  NULL /*userspace addr of environment*/,
+			  stackptr, entrypoint);
+
+	/* enter_new_process does not return. */
+	panic("enter_new_process returned\n");
+	return EINVAL;
 }

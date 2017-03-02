@@ -19,12 +19,12 @@ Opens the given file for reading with the given flags.
 int
 sys_open(const char *filename, int flags, int32_t *output)
 {
-
     struct vnode *new;
     int result;
 	char *path;
     size_t *path_len;
     int err;
+	struct ft *ft = curproc->proc_ft;
 
     path = kmalloc(PATH_MAX);
     path_len = kmalloc(sizeof(int));
@@ -53,11 +53,6 @@ sys_open(const char *filename, int flags, int32_t *output)
 		return ENOMEM;
 	}
 
-    result = add_entry(curproc->proc_ft, entry, output);
-    if (result){
-        return result;
-    }
-
 	if (flags & O_APPEND) {
         struct stat *stat;
 		off_t eof;
@@ -67,6 +62,8 @@ sys_open(const char *filename, int flags, int32_t *output)
             return ENOMEM;
         }
 
+		//TODO: this doesn't work for concurrency
+
 		VOP_STAT(entry->file, stat);
 		eof = stat->st_size;
 		entry->offset = eof;
@@ -74,6 +71,14 @@ sys_open(const char *filename, int flags, int32_t *output)
 	}
 
 	entry->rwflags = flags;
+
+	lock_acquire(ft->ft_lock);
+    result = add_entry(ft, entry, output);
+	lock_release(ft->ft_lock);
+
+    if (result){
+        return result;
+    }
 
     return 0;
 }
@@ -84,12 +89,17 @@ Closes the file at fd. Returns EBADF if fd is not used.
 int
 sys_close(int fd)
 {
-	if(!fd_valid_and_used(curproc->proc_ft,fd)) {
+	struct ft *ft = curproc->proc_ft;
+
+	lock_acquire(ft->ft_lock);
+	if(!fd_valid_and_used(ft,fd)) {
+		lock_release(ft->ft_lock);
 		return EBADF;
 	}
 
-	free_fd(curproc->proc_ft, fd);
-
+	free_fd(ft, fd);
+	
+	lock_release(ft->ft_lock);
 	return 0;
 }
 
@@ -100,17 +110,26 @@ current seek position. The file must be open for writing.
 int
 sys_write(int fd, const void *buf, size_t nbytes, int32_t *retval0)
 {
+	struct ft *ft = curproc->proc_ft;
+	struct iovec iov;
+	struct uio u;
+	int result;
+	struct ft_entry *entry;
 
-	if (!fd_valid_and_used(curproc->proc_ft, fd)) {
+	lock_acquire(ft->ft_lock);
+	if (!fd_valid_and_used(ft, fd)) {
+		lock_acquire(ft->ft_lock);
 		return EBADF;
 	}
 
-    struct iovec iov;
-	struct uio u;
-	int result;
-    struct ft_entry *entry = curproc->proc_ft->entries[fd];
+	entry = ft->entries[fd];
+	lock_acquire(entry->entry_lock);
+
+	lock_release(ft->ft_lock);
+
 
 	if (!(entry->rwflags & (O_WRONLY | O_RDWR))) {
+		lock_release(entry->entry_lock);
 		return EBADF;
 	}
 
@@ -126,13 +145,16 @@ sys_write(int fd, const void *buf, size_t nbytes, int32_t *retval0)
 
 	result = VOP_WRITE(entry->file, &u);
 	if (result) {
+		lock_release(entry->entry_lock);
 		return result;
 	}
 
 	ssize_t len = nbytes - u.uio_resid;
 	entry->offset += (off_t) len;
 
+	lock_release(entry->entry_lock);
     *retval0 = len;
+
 	return 0;
 }
 
@@ -143,18 +165,26 @@ at current seek position. The file must be open for reading.
 int
 sys_read(int fd, void *buf, size_t buflen, ssize_t *retval0)
 {
+	struct ft *ft = curproc->proc_ft;
+	struct iovec iov;
+	struct uio u;
+	int result;
+    struct ft_entry *entry;
 
-	if (!fd_valid_and_used(curproc->proc_ft, fd)) {
+	lock_acquire(ft->ft_lock);
+	if (!fd_valid_and_used(ft, fd)) {
+		lock_acquire(ft->ft_lock);
 		return EBADF;
 	}
 
+	entry = ft->entries[fd];
+	lock_acquire(entry->entry_lock);
 
-    struct iovec iov;
-	struct uio u;
-	int result;
-    struct ft_entry *entry = curproc->proc_ft->entries[fd];
+	lock_release(ft->ft_lock);
+
 
 	if (entry->rwflags & O_WRONLY) {
+		lock_release(entry->entry_lock);
 		return EBADF;
 	}
 
@@ -170,13 +200,16 @@ sys_read(int fd, void *buf, size_t buflen, ssize_t *retval0)
 
 	result = VOP_READ(entry->file, &u);
 	if (result) {
+		lock_release(entry->entry_lock);
 		return result;
 	}
 
 	ssize_t len = buflen - u.uio_resid;
 	entry->offset += (off_t) len;
 
+	lock_release(entry->entry_lock);
     *retval0 = len;
+
     return 0;
 }
 
@@ -197,13 +230,19 @@ sys_lseek(int fd, off_t pos, int whence, int32_t *retval0, int32_t *retval1)
 	off_t eof;
 	off_t seek;
 
+	lock_acquire(ft->ft_lock);
 	if (!fd_valid_and_used(ft, fd)) {
+		lock_release(ft->ft_lock);
 		return EBADF;
 	}
 
 	entry = ft->entries[fd];
+	lock_acquire(entry->entry_lock);
+
+	lock_release(ft->ft_lock);
 
 	if (!VOP_ISSEEKABLE(entry->file)) {
+		lock_release(entry->entry_lock);
 		return ESPIPE;
 	}
 
@@ -226,11 +265,13 @@ sys_lseek(int fd, off_t pos, int whence, int32_t *retval0, int32_t *retval1)
 	}
 
 	if (seek < 0) {
+		lock_release(entry->entry_lock);
 		return EINVAL;
 	}
 
 	entry->offset = seek;
 
+	lock_release(entry->entry_lock);
 	*retval0 = seek >> 32;
 	*retval1 = seek & 0xFFFFFFFF;
 
@@ -249,18 +290,25 @@ sys_dup2(int oldfd, int newfd, int *output)
 	}
 
     struct ft *ft = curproc->proc_ft;
-	struct ft_entry *entry = ft->entries[oldfd];
+	struct ft_entry *entry;
+
+	lock_acquire(ft->ft_lock);
 
 	if (!fd_valid_and_used(ft, oldfd)) {
+		lock_release(ft->ft_lock);
 		return EBADF;
 	}
+
+	entry = ft->entries[oldfd];	
 
 	if (fd_valid_and_used(ft, newfd)){
 		free_fd(ft, newfd);
 	}
 
 	assign_fd(ft, entry, newfd);
+	lock_release(ft->ft_lock);	
     *output = newfd;
+
 	return 0;
 }
 

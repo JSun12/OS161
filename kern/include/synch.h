@@ -68,8 +68,7 @@ void V(struct semaphore *);
 /*
  * Simple lock for mutual exclusion.
  *
- * When the lock is created, no thread should be holding it. Likewise,
- * when the lock is destroyed, no thread should be holding it.
+ * When the lock is created, no thread should be holding it.
  *
  * The name field is for easier debugging. A copy of the name is
  * made internally.
@@ -83,7 +82,7 @@ struct lock {
 	struct wchan *lk_wchan;
 	struct spinlock lk_lock;
 	struct thread *lk_thread;
-	volatile int *lk_flag;
+	volatile int lk_flag;
 };
 
 struct lock *lock_create(const char *name);

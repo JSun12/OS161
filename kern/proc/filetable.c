@@ -7,6 +7,9 @@
 #include <kern/errno.h>
 
 
+static int init_std_io(struct ft *, int, int);
+
+
 struct ft *
 ft_create()
 {
@@ -43,69 +46,48 @@ ft_destroy(struct ft *ft)
 Initializes the console of the filetable.
 */
 int
-ft_init_std(struct ft *ft){
-
+ft_init_std(struct ft *ft)
+{
     KASSERT(ft != NULL);
 
-    const char * cons = "con:";
+    int result;
 
-    if (ft->entries[0] == NULL){
-        struct vnode *stdin_v;
-        int ret;
-
-        ret = vfs_open(kstrdup(cons), O_RDONLY, 0, &stdin_v);
-        if (ret) {
-            return ret;
-        }
-
-        ft->entries[0] = entry_create(stdin_v);
-        if (ft->entries[0] == NULL) {
-            return ENOMEM;
-        }
-
-        ft->entries[0]->rwflags = O_RDONLY;
-        entry_incref(ft->entries[0]);
-        (void) ret;
+    result = init_std_io(ft, 0, O_RDONLY);
+    if (result) {
+        return result;
+    }
+    result = init_std_io(ft, 1, O_WRONLY);
+    if (result) {
+        return result;
+    }
+    result = init_std_io(ft, 2, O_WRONLY);
+    if (result) {
+        return result;
     }
 
-    if (ft->entries[1] == NULL){
-        struct vnode *stdout_v;
-        int ret;
+    return 0;
+}
 
-        ret = vfs_open(kstrdup(cons), O_WRONLY, 0, &stdout_v);
-        if (ret) {
-            return ret;
-        }
+static 
+int 
+init_std_io(struct ft *ft, int fd, int rwflags)
+{
+    struct vnode *std_io;
+    int ret;
+    const char *cons = "con:";    
 
-        ft->entries[1] = entry_create(stdout_v);
-        if (ft->entries[1] == NULL) {
-            return ENOMEM;
-        }
-
-        ft->entries[1]->rwflags = O_WRONLY;
-        entry_incref(ft->entries[1]);
-        (void) ret;
+    ret = vfs_open(kstrdup(cons), rwflags, 0, &std_io);
+    if (ret) {
+        return ret;
     }
 
-    if (ft->entries[2] == NULL){
-        struct vnode *stderr_v;
-        int ret;
-
-        ret = vfs_open(kstrdup(cons), O_WRONLY, 0, &stderr_v);
-        if (ret) {
-            return ret;
-        }
-
-        ft->entries[2] = entry_create(stderr_v);
-        if (ft->entries[2] == NULL) {
-            return ENOMEM;
-        }
-
-        ft->entries[2]->rwflags = O_WRONLY;
-        entry_incref(ft->entries[2]);
-        (void) ret;
+    ft->entries[fd] = entry_create(std_io);
+    if (ft->entries[fd] == NULL) {
+        return ENOMEM;
     }
 
+    ft->entries[fd]->rwflags = rwflags;
+    entry_incref(ft->entries[fd]);
     return 0;
 }
 
@@ -140,9 +122,11 @@ assign_fd(struct ft *ft, struct ft_entry *entry, int fd)
     KASSERT(fd_valid(fd));
 
     ft->entries[fd] = entry;
-    entry_incref(entry);
-}
 
+    lock_acquire(entry->entry_lock);
+    entry_incref(entry);
+    lock_release(entry->entry_lock);
+}
 
 void
 free_fd(struct ft *ft, int fd)
@@ -154,7 +138,10 @@ free_fd(struct ft *ft, int fd)
         return;
     }
 
-    entry_decref(ft->entries[fd]);
+    struct ft_entry *entry = ft->entries[fd];    
+
+    lock_acquire(entry->entry_lock);
+    entry_decref(entry, true);
     ft->entries[fd] = NULL;
 }
 
@@ -185,8 +172,6 @@ The new_ft is still being created, so we don't need to acquire it's lock.
 void
 ft_copy(struct ft *old_ft, struct ft *new_ft)
 {
-    lock_acquire(old_ft->ft_lock);
-
     for (int i = 0; i < OPEN_MAX; i++) {
         struct ft_entry *entry; 
         entry = old_ft->entries[i]; 
@@ -201,8 +186,6 @@ ft_copy(struct ft *old_ft, struct ft *new_ft)
 
         new_ft->entries[i] = entry;
     }
-
-    lock_release(old_ft->ft_lock);
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
@@ -210,9 +193,9 @@ ft_copy(struct ft *old_ft, struct ft *new_ft)
 struct ft_entry *
 entry_create(struct vnode *vnode)
 {
-    struct ft_entry *entry;
-
     KASSERT(vnode != NULL);
+
+    struct ft_entry *entry;
 
     entry = kmalloc(sizeof(struct ft_entry));
     if (entry == NULL) {
@@ -231,6 +214,9 @@ entry_create(struct vnode *vnode)
     return entry;
 }
 
+/*
+Must acquire both ft_lock and entry_lock to delete an entry.
+*/
 void
 entry_destroy(struct ft_entry *entry)
 {
@@ -245,18 +231,20 @@ void
 entry_incref(struct ft_entry *entry)
 {
     KASSERT(entry != NULL);
-
     entry->count += 1;
 }
 
 void
-entry_decref(struct ft_entry *entry)
+entry_decref(struct ft_entry *entry, bool lock_held)
 {
     KASSERT(entry != NULL);
+    KASSERT(lock_held);
 
     entry->count -= 1;
     if (entry->count == 0){
         entry_destroy(entry);
+        return;
     }
+    lock_release(entry->entry_lock);
 }
 

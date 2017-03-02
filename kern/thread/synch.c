@@ -163,7 +163,7 @@ lock_create(const char *name)
 
 	spinlock_init(&lock->lk_lock);
 	lock->lk_thread = NULL;
-	lock->lk_flag = (int*) FALSE;
+	lock->lk_flag = false;
 
     KASSERT(lock->lk_thread == NULL);
 
@@ -174,14 +174,10 @@ void
 lock_destroy(struct lock *lock)
 {
     KASSERT(lock != NULL);
-	KASSERT(lock->lk_thread == NULL);
-    KASSERT(lock->lk_flag == (int*) FALSE);
 
 	/* wchan_cleanup will assert if anyone's waiting on it */
 	wchan_destroy(lock->lk_wchan);
     spinlock_cleanup(&lock->lk_lock);
-    kfree((void *)lock->lk_flag);
-	kfree(lock->lk_thread);
     kfree(lock->lk_name);
     kfree(lock);
 }
@@ -193,14 +189,14 @@ lock_acquire(struct lock *lock)
 	KASSERT(curthread->t_in_interrupt == false);
     spinlock_acquire(&lock->lk_lock);
 
-	while (lock->lk_flag == (int*) TRUE) {
+	while (lock->lk_flag == true) {
         wchan_sleep(lock->lk_wchan, &lock->lk_lock);
         // Recheck the flag's status before proceeding
     }
 
-    KASSERT(lock->lk_flag == (int*) FALSE);
+    KASSERT(lock->lk_flag == false);
 
-    lock->lk_flag = (int*) 1;
+    lock->lk_flag = true;
     lock->lk_thread = curthread;
     spinlock_release(&lock->lk_lock);
 }
@@ -211,11 +207,11 @@ lock_release(struct lock *lock)
     KASSERT(lock != NULL);
     KASSERT(curthread->t_in_interrupt == false);
     KASSERT(lock->lk_thread == curthread);
-    KASSERT(lock->lk_flag == (int*) TRUE);
+    KASSERT(lock->lk_flag == true);
 
     spinlock_acquire(&lock->lk_lock);
 
-    lock->lk_flag = FALSE;
+    lock->lk_flag = false;
     lock->lk_thread = NULL;
     wchan_wakeone(lock->lk_wchan, &lock->lk_lock);
 
@@ -227,7 +223,7 @@ lock_do_i_hold(struct lock *lock)
 {
     KASSERT(lock != NULL);
 
-    return (lock->lk_flag == (int*) 1 && lock->lk_thread == curthread);
+    return (lock->lk_flag == true && lock->lk_thread == curthread);
 }
 
 ////////////////////////////////////////////////////////////

@@ -94,6 +94,8 @@ int sys_getpid(int32_t *);
 int assign_pid(struct proc *, int32_t *);
 void enter_usermode(void *, unsigned long);
 
+int sys_execv(const char *, char **);
+
 
 
 #endif /* _PROC_H_ */

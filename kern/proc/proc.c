@@ -433,8 +433,6 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 	}
 	*retval0 = new_proc->pid;
 	//TODO: clean up if this fails
-	//int *test;  //TODO: Remove this shit
-	array_add(curproc->children, new_proc, NULL); //XXX: Can we put in a pid properly like this?
 
 	struct ft *ft = curproc->proc_ft;
 	lock_acquire(ft->ft_lock);
@@ -497,6 +495,9 @@ pidtable_add(struct proc *proc)
 
 	lock_acquire(pidtable->pid_lock);
 
+	// Add the given process to the parent
+	array_add(curproc->children, proc, NULL);
+
 	if(pidtable->pid_available > 0){
 		next = pidtable->pid_next;
 		pidtable->pid_procs[next] = proc;
@@ -527,6 +528,8 @@ pidtable_add(struct proc *proc)
 	return output;
 }
 
+
+//TODO: Remove this unused call
 int
 pidtable_pid_status(pid_t pid)
 {
@@ -573,6 +576,7 @@ pidtable_exit(struct proc *proc, int32_t waitcode)
 
 	lock_release(pidtable->pid_lock);
 
+	// We might want to synchronize this more
 	thread_exit();
 }
 
@@ -624,16 +628,18 @@ sys_waitpid(pid_t pid, int32_t *retval0)
 {
 	lock_acquire(pidtable->pid_lock);
 
-	int status = pidtable_pid_status(pid);
+	int status = pidtable->pid_status[pid];
 
-	while(status != READY){
+	while(status != ZOMBIE){
 		cv_wait(pidtable->pid_cv, pidtable->pid_lock);
-		status = pidtable_pid_status(pid);
+		status = pidtable->pid_status[pid];
 	}
 
 	lock_release(pidtable->pid_lock);
 
-	*retval0 = status;
+	if(retval0 != NULL){
+		*retval0 = status;
+	}
 
 	return 0;
 }

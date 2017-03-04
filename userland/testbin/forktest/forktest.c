@@ -56,7 +56,7 @@ int
 dofork(void)
 {
 	int pid;
-	pid = fork();	
+	pid = fork();
 	if (pid < 0) {
 		warn("fork");
 	}
@@ -154,20 +154,19 @@ test(int nowait)
 	putchar('3');
 	check();
 
-	while(1){};
+
+	if(1 == 1){
 	/*
 	 * These must be called in reverse order to avoid waiting
 	 * improperly.
 	 */
-
-	if (1 == 0) {
-		dowait(nowait, pid3);
-		dowait(nowait, pid2);
-		dowait(nowait, pid1);
-		dowait(nowait, pid0);
-
-		putchar('\n');
+	dowait(nowait, pid3);
+	dowait(nowait, pid2);
+	dowait(nowait, pid1);
+	dowait(nowait, pid0);
 	}
+	while(1){}
+	putchar('\n');
 }
 
 int
@@ -175,7 +174,7 @@ main(int argc, char *argv[])
 {
 	static const char expected[] =
 		"|----------------------------|\n";
-	int nowait=0;
+	int nowait=1;
 
 	if (argc==2 && !strcmp(argv[1], "-w")) {
 		nowait=1;

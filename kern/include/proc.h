@@ -40,7 +40,18 @@
 #include <thread.h> /* required for struct threadarray */
 #include <filetable.h>
 #include <machine/trapframe.h>
+#include <limits.h>
 
+/*
+* Table index status for pidtable
+*/
+#define READY 0     /* Index available for process */
+#define RUNNING 1   /* Process running */
+#define ZOMBIE 2    /* Process waiting to be reaped */
+#define ORPHAN 3    /* Process running and parent exited */
+
+/* Identifier for pid_next */
+#define NONEXT 0
 
 /*
  * Process structure.
@@ -49,11 +60,10 @@ struct proc {
 	char *p_name;			/* Name of this process */
 	struct spinlock p_lock;		/* Lock for this structure */
 	struct threadarray p_threads;	/* Threads in this process */
-	
-	/* Pid structures */
-	struct lock *pid_lock;
-	struct proc **pid_array; 
-	pid_t pid; 
+
+	/* PID */
+	pid_t pid;  /* Process id */
+	struct array *children;
 
 	/* VM */
 	struct addrspace *p_addrspace;	/* virtual address space */
@@ -62,6 +72,22 @@ struct proc {
 	struct vnode *p_cwd;		/* current working directory */
 	struct ft *proc_ft;
 };
+
+struct pidtable {
+	struct lock *pid_lock;
+	struct cv *pid_cv;  /* To allow for processes to sleep on waitpid */
+	struct proc *pid_procs[PID_MAX+1]; /* Array to hold processes */
+	int pid_status[PID_MAX+1]; /* Array to hold process statuses */
+	int pid_waitcode[PID_MAX+1]; /* Array to hold the wait codes*/
+	int pid_available;  /* Number of available pid spaces */
+	int pid_next; /* Lowest free PID */
+};
+
+/* Initializes the pid table*/
+void pidtable_bootstrap(void);
+int pidtable_find(struct proc *);
+int pidtable_add(struct proc *);
+void pidtable_remove(struct proc *, int32_t);
 
 /* This is the process structure for the kernel and for kernel-only threads. */
 extern struct proc *kproc;
@@ -91,7 +117,9 @@ struct addrspace *proc_setas(struct addrspace *);
 /* Process syscalls */
 int sys_fork(struct trapframe *, int32_t *);
 int sys_getpid(int32_t *);
-int assign_pid(struct proc *, int32_t *);
+int sys_waitpid(int32_t *);
+int sys__exit(int32_t);
+//int assign_pid(struct proc *, int32_t *);
 void enter_usermode(void *, unsigned long);
 
 int sys_execv(const char *, char **);

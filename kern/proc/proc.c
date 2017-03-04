@@ -48,7 +48,7 @@
 #include <current.h>
 #include <addrspace.h>
 #include <filetable.h>
-
+#include <limits.h>
 #include <kern/errno.h>
 #include <machine/trapframe.h>
 #include <cpu.h>
@@ -67,6 +67,10 @@
  */
 struct proc *kproc;
 
+/*
+ * The PID table accessible by all processes and global statuses for table
+ */
+static struct pidtable *pidtable;
 
 /*
  * Create a proc structure.
@@ -89,10 +93,18 @@ proc_create(const char *name)
 	proc->proc_ft = ft_create();
 	if (proc->proc_ft == NULL) {
 		kfree(proc->p_name);
-		kfree(proc); 
+		kfree(proc);
 		return NULL;
 	}
-	
+
+	proc->children = array_create();
+	if (proc->children == NULL) {
+		kfree(proc->proc_ft);
+		kfree(proc->p_name);
+		kfree(proc);
+		return NULL;
+	}
+
 	threadarray_init(&proc->p_threads);
 	spinlock_init(&proc->p_lock);
 
@@ -102,10 +114,11 @@ proc_create(const char *name)
 	/* VFS fields */
 	proc->p_cwd = NULL;
 
+	/* PID fields */
+	proc->pid = 1;  /* The kernel thread is defined to be 1 */
+
 	return proc;
 }
-
-
 
 /*
  * Destroy a proc structure.
@@ -229,22 +242,9 @@ proc_create_runprogram(const char *name)
 	if (ret) {
 		kfree(newproc);
 		return NULL;
-	}	
-
-	newproc->pid_lock = lock_create("new_lock");
-	if (newproc->pid_lock == NULL) {
-		kfree(newproc); 
-		return NULL;
 	}
 
-	struct proc *pid_array[PID_MAX];
-	for (int i = 0; i < PID_MAX; i++) {
-		pid_array[i] = NULL;
-	}
-
-	newproc->pid_array = pid_array;
-	newproc->pid_array[0] = newproc; 
-	newproc->pid = 1; 
+	newproc->pid = (int) NULL;
 
 	/* VM fields */
 
@@ -263,9 +263,6 @@ proc_create_runprogram(const char *name)
 		newproc->p_cwd = curproc->p_cwd;
 	}
 	spinlock_release(&curproc->p_lock);
-
-	/* Initialize console */
-
 
 	return newproc;
 }
@@ -386,7 +383,7 @@ TODO: set address spaces, properly
 int
 sys_fork(struct trapframe *tf, int32_t *retval0)
 {
-	struct proc *new_proc; 
+	struct proc *new_proc;
 	struct trapframe *new_tf;
 	int result;
 
@@ -397,7 +394,7 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 
 	new_tf = kmalloc(sizeof(struct trapframe));
 	if (new_tf == NULL) {
-		kfree(new_proc); 
+		kfree(new_proc);
 		return ENOMEM;
 	}
 
@@ -413,13 +410,14 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 	}
 	spinlock_release(&curproc->p_lock);
 
-	new_proc->pid_lock = curproc->pid_lock;
-	new_proc->pid_array = curproc->pid_array;
-
-	result = assign_pid(new_proc, retval0);
-	if (result) {
-		return result;
+	new_proc->pid = pidtable_add(new_proc);
+	if(new_proc->pid == -1){
+		return ENPROC;
 	}
+	*retval0 = new_proc->pid;
+	//TODO: clean up if this fails
+	//int *test;  //TODO: Remove this shit
+	array_add(curproc->children, &new_proc->pid, NULL); //XXX: Can we put in a pid properly like this?
 
 	struct ft *ft = curproc->proc_ft;
 	lock_acquire(ft->ft_lock);
@@ -438,45 +436,171 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 	}
 
 	return 0;
+}
 
-	// kprintf("here");
+void
+pidtable_bootstrap()
+{
+	/* Set up the pidtables */
+	pidtable = kmalloc(sizeof(struct pidtable));
+	if (pidtable == NULL) {
+		panic("Unable to initialize PID table.\n");
+	}
+
+	pidtable->pid_lock = lock_create("pidtable lock");
+	if (pidtable->pid_lock == NULL) {
+		panic("Unable to intialize PID table's lock.\n");
+	}
+
+	pidtable->pid_cv = cv_create("pidtable cv");
+	if (pidtable->pid_lock == NULL) {
+		panic("Unable to intialize PID table's cv.\n");
+	}
+
+	/* Set the starting constants */
+	pidtable->pid_procs[kproc->pid] = kproc;
+	pidtable->pid_status[kproc->pid] = RUNNING;
+	pidtable->pid_waitcode[kproc->pid] = (int) NULL;
+	pidtable->pid_available = PID_MAX - 1;
+	pidtable->pid_next = PID_MIN;
+
+	/* Populate the initial PID stats array with ready status */
+	for (int i = PID_MIN; i < PID_MAX; i++){
+		pidtable->pid_procs[i] = NULL;
+		pidtable->pid_status[i] = READY;
+		pidtable->pid_waitcode[i] = (int) NULL;
+	}
+}
+
+int
+pidtable_add(struct proc *proc)
+{
+	int output;
+	int next;
+
+	lock_acquire(pidtable->pid_lock);
+
+	if(pidtable->pid_available > 0){
+		next = pidtable->pid_next;
+		pidtable->pid_procs[next] = proc;
+		pidtable->pid_status[next] = RUNNING;
+		pidtable->pid_waitcode[next] = (int) NULL;
+		pidtable->pid_available--;
+		output = next;
+
+		if(pidtable->pid_available > 0){
+			for (int i = next; i < PID_MAX; i++){
+				if (pidtable->pid_status[i] == READY){
+					pidtable->pid_next = i;
+					break;
+				}
+			}
+		}
+		else{
+			pidtable->pid_next = -1; // Full signal
+		}
+	}
+	else{
+		output = -1;
+		panic("PID table full!\n");
+	}
+
+	lock_release(pidtable->pid_lock);
+
+	return output;
+}
+
+int
+pidtable_find(struct proc *proc)
+{
+	return proc->pid;
+}
+
+void
+pidtable_remove(struct proc *proc, int32_t waitcode)
+{
+	//TODO: Orphan children of a parent
+	lock_acquire(pidtable->pid_lock);
+
+	/* Begin by orphaning all children */
+	int num_child = array_num(proc->children);
+	for(int i = 0; i < num_child; i++){
+		struct proc *child = array_get(proc->children, i);
+		int child_pid = child->pid;
+		/* Signal to the child we don't need it anymore */
+		if(pidtable->pid_status[child_pid] == RUNNING){
+			pidtable->pid_status[child_pid] = ORPHAN;
+		}
+		/* If the child isn't running, it's a zombie. Remove it here*/
+		else{
+			pidtable->pid_available++;
+			pidtable->pid_procs[child_pid] = NULL;
+			pidtable->pid_status[child_pid] = READY;
+			pidtable->pid_waitcode[child_pid] = (int) NULL;
+			proc_destroy(child);
+		}
+
+	}
+
+	/*
+	* Now update the status of the given process.
+	*/
+
+	/* Case: Signal the parent that the child ended with waitcode given. */
+	if(pidtable->pid_status[proc->pid] == RUNNING){
+		pidtable->pid_status[proc->pid] = ZOMBIE;
+		pidtable->pid_waitcode[proc->pid] = waitcode;
+	}
+	/* Case: Parent already exited. Reset the current pidtable spot for later use. */
+	else if(pidtable->pid_status[proc->pid] == ORPHAN){
+		pidtable->pid_available++;
+		pidtable->pid_procs[proc->pid] = NULL;
+		pidtable->pid_status[proc->pid] = READY;
+		pidtable->pid_waitcode[proc->pid] = (int) NULL;
+		proc_destroy(proc);
+	}
+	else{
+		panic("Tried to remove a bad process.\n");
+	}
+
+	/* Broadcast to any waiting processes. There is no guarentee that the processes on the cv are waiting for us */
+	cv_broadcast(pidtable->pid_cv,pidtable->pid_lock);
+
+	lock_release(pidtable->pid_lock);
+
+	return;
 }
 
 int
 sys_getpid(int32_t *retval0)
 {
-	*retval0 = curproc->pid;
+	*retval0 = pidtable_find(curproc);
 	return 0;
 }
 
 int
-assign_pid(struct proc *new_proc, int32_t *retval0)
+sys_waitpid(int32_t *retval0)
 {
-	lock_acquire(new_proc->pid_lock);
+	panic("LOLLLLL");
+	*retval0 = pidtable_find(curproc);
+	return 0;
+}
 
-	for (int i = 0; i < PID_MAX; i++){
-		if (new_proc->pid_array[i] != NULL) {
-			continue;
-		}
-		new_proc->pid_array[i] = new_proc;
-		new_proc->pid = i+1;
-		*retval0 = (int32_t) i;
-
-		lock_release(new_proc->pid_lock);
-		return 0; 
-	}
-
-	lock_release(new_proc->pid_lock);
-	return -1;
+int
+sys__exit(int32_t waitcode)
+{
+	pidtable_remove(curproc, waitcode);
+	return 0;
 }
 
 // make sure to free the trapframe in the heap.
 void
 enter_usermode(void *data1, unsigned long data2)
 {
-	(void) data2; 
+	(void) data2;
 	void *tf = (void *) curthread->t_stack + 16;
 
+	//TODO: FREE DATA1 I think?
 	memcpy(tf, (const void *) data1, sizeof(struct trapframe));
 	as_activate();
 	mips_usermode(tf);

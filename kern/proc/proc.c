@@ -200,7 +200,11 @@ proc_destroy(struct proc *proc)
 
 	ft_destroy(proc->proc_ft);
 
-	//proc_remthread(struct thread *t)
+
+	int threadarray_size = threadarray_num(&proc->p_threads);
+	for (int i = 0; i < threadarray_size; i++){
+		threadarray_remove(&proc->p_threads, 0);
+	}
 	threadarray_cleanup(&proc->p_threads);
 	spinlock_cleanup(&proc->p_lock);
 
@@ -245,7 +249,11 @@ proc_create_runprogram(const char *name)
 		return NULL;
 	}
 
-	newproc->pid = (int) NULL;
+	//XXX: Make this cleaner
+	newproc->pid = pidtable_add(newproc);
+	if(newproc->pid == -1){
+		panic("Could not add new process to pid table");
+	}
 
 	/* VM fields */
 
@@ -507,9 +515,15 @@ pidtable_add(struct proc *proc)
 }
 
 int
-pidtable_find(struct proc *proc)
+pidtable_pid_status(pid_t pid)
 {
-	return proc->pid;
+	int status;
+
+	lock_acquire(pidtable->pid_lock);
+	status = pidtable->pid_status[pid];
+	lock_release(pidtable->pid_lock);
+
+	return status;
 }
 
 /*
@@ -526,7 +540,6 @@ pidtable_exit(struct proc *proc, int32_t waitcode)
 
 	/* Case: Signal the parent that the child ended with waitcode given. */
 	if(pidtable->pid_status[proc->pid] == RUNNING){
-		proc_remthread(curthread);
 		pidtable->pid_status[proc->pid] = ZOMBIE;
 		pidtable->pid_waitcode[proc->pid] = waitcode;
 	}
@@ -536,7 +549,6 @@ pidtable_exit(struct proc *proc, int32_t waitcode)
 		pidtable->pid_procs[proc->pid] = NULL;
 		pidtable->pid_status[proc->pid] = READY;
 		pidtable->pid_waitcode[proc->pid] = (int) NULL;
-		proc_remthread(curthread);
 		proc_destroy(curproc);
 	}
 	else{
@@ -548,7 +560,7 @@ pidtable_exit(struct proc *proc, int32_t waitcode)
 
 	lock_release(pidtable->pid_lock);
 
-	return;
+	thread_exit();
 }
 
 /*
@@ -570,16 +582,15 @@ pidtable_update_children(struct proc *proc)
 		}
 		else if (pidtable->pid_status[child_pid] == ZOMBIE){
 			//struct thread *child_thread = threadarray_get(&child->p_threads, 0);
-			proc_destroy(child);
 			pidtable->pid_available++;
-			pidtable->pid_procs[proc->pid] = NULL;
-			pidtable->pid_status[proc->pid] = READY;
-			pidtable->pid_waitcode[proc->pid] = (int) NULL;
+			pidtable->pid_procs[child->pid] = NULL;
+			pidtable->pid_status[child->pid] = READY;
+			pidtable->pid_waitcode[child->pid] = (int) NULL;
+			proc_destroy(child);
 			//proc_remthread(child_thread);
-
 		}
 		else{
-			panic("We tried to modify a child that did not exist.\n");
+			panic("Tried to modify a child that did not exist.\n");
 		}
 	}
 }
@@ -587,29 +598,39 @@ pidtable_update_children(struct proc *proc)
 int
 sys_getpid(int32_t *retval0)
 {
-	*retval0 = pidtable_find(curproc);
+	lock_acquire(pidtable->pid_lock);
+
+	*retval0 = curproc->pid;
+
+	lock_release(pidtable->pid_lock);
 	return 0;
 }
 
 int
-sys_waitpid(int32_t *retval0)
+sys_waitpid(pid_t pid, int32_t *retval0)
 {
-	panic("LOLLLLL");
-	*retval0 = pidtable_find(curproc);
+	lock_acquire(pidtable->pid_lock);
+
+	int status = pidtable_pid_status(pid);
+
+	while(status != READY){
+		cv_wait(pidtable->pid_cv, pidtable->pid_lock);
+		status = pidtable_pid_status(pid);
+	}
+
+	lock_release(pidtable->pid_lock);
+
+	*retval0 = status;
+
 	return 0;
 }
 
 int
 sys__exit(int32_t waitcode)
 {
-	//lock_acquire(pidtable->pid_lock);
-	(void) waitcode;
 	pidtable_exit(curproc, waitcode);
-	//proc_remthread(curthread);
-	//proc_destroy(curproc);
 
-	//lock_release(pidtable->pid_lock);
-	//thread_exit();
+	panic("Exit syscall should never get to this point.");
 	return 0;
 }
 

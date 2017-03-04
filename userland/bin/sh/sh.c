@@ -432,7 +432,6 @@ docommand(char *buf, struct exitinfo *ei)
 			/* child */
 			execvp(args[0], args);
 			warn("%s", args[0]);
-			while(1);
 			/*
 			 * Use _exit() instead of exit() in the child
 			 * process to avoid calling atexit() functions,
@@ -453,8 +452,6 @@ docommand(char *buf, struct exitinfo *ei)
 		exitinfo_exit(ei, 0);
 		return;
 	}
-
-	while(1);
 
 	if (waitpid(pid, &status, 0) < 0) {
 		warn("waitpid");

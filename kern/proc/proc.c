@@ -783,23 +783,23 @@ sys_execv(const char *prog, char **args)
 	kprintf("%s\n", args_in[0]);
 
 	userptr_t *args_out;
-	userptr_t arg_addr = (userptr_t) (stackptr - argc*sizeof(userptr_t *));
-	args_out = (userptr_t *) (stackptr - argc*sizeof(userptr_t *));
+	userptr_t arg_addr = (userptr_t) (stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
+	args_out = (userptr_t *) (stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
 	for (i = 0; i < argc; i++) {
 		arg_addr -= size[i]; 
-		arg_addr -= ((int) arg_addr % 4);
 		*args_out = arg_addr;
 		path_len = kmalloc(sizeof(int));
 		copyoutstr((const char *) args_in[i], arg_addr, (size_t) size[i], path_len);
 		args_out++;
 	}
 
-	args_out = (userptr_t *) (stackptr - argc*sizeof(int));
+	*args_out = NULL;
+	args_out = (userptr_t *) (stackptr - argc*sizeof(int) - sizeof(NULL));
 	stackptr = (vaddr_t) arg_addr;
 	
 
 	/* Warp to user mode. */
-	enter_new_process(argc - 1, (userptr_t) args_out,
+	enter_new_process(argc, (userptr_t) args_out,
 			  NULL /*userspace addr of environment*/,
 			  stackptr, entrypoint);
 

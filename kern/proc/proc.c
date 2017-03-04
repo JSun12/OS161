@@ -152,6 +152,12 @@ proc_destroy(struct proc *proc)
 		proc->p_cwd = NULL;
 	}
 
+	/* PID Fields */
+	int children_size = array_num(proc->children);
+	for (int i = 0; i < children_size; i++){
+		array_remove(proc->children, 0);
+	}
+
 	/* VM fields */
 	if (proc->p_addrspace) {
 		/*
@@ -202,8 +208,11 @@ proc_destroy(struct proc *proc)
 
 	ft_destroy(proc->proc_ft);
 
+	//proc_remthread(struct thread *t)
 	threadarray_cleanup(&proc->p_threads);
 	spinlock_cleanup(&proc->p_lock);
+
+	array_destroy(proc->children);
 
 	kfree(proc->p_name);
 	kfree(proc);
@@ -417,7 +426,7 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 	*retval0 = new_proc->pid;
 	//TODO: clean up if this fails
 	//int *test;  //TODO: Remove this shit
-	array_add(curproc->children, &new_proc->pid, NULL); //XXX: Can we put in a pid properly like this?
+	array_add(curproc->children, new_proc, NULL); //XXX: Can we put in a pid properly like this?
 
 	struct ft *ft = curproc->proc_ft;
 	lock_acquire(ft->ft_lock);
@@ -457,7 +466,7 @@ pidtable_bootstrap()
 		panic("Unable to intialize PID table's cv.\n");
 	}
 
-	/* Set the starting constants */
+	/* Set the kernel thread parameters */
 	pidtable->pid_procs[kproc->pid] = kproc;
 	pidtable->pid_status[kproc->pid] = RUNNING;
 	pidtable->pid_waitcode[kproc->pid] = (int) NULL;
@@ -516,38 +525,21 @@ pidtable_find(struct proc *proc)
 	return proc->pid;
 }
 
+/*
+ * Function called when a process exits.
+ */
 void
-pidtable_remove(struct proc *proc, int32_t waitcode)
+pidtable_exit(struct proc *proc, int32_t waitcode)
 {
 	//TODO: Orphan children of a parent
 	lock_acquire(pidtable->pid_lock);
 
 	/* Begin by orphaning all children */
-	int num_child = array_num(proc->children);
-	for(int i = 0; i < num_child; i++){
-		struct proc *child = array_get(proc->children, i);
-		int child_pid = child->pid;
-		/* Signal to the child we don't need it anymore */
-		if(pidtable->pid_status[child_pid] == RUNNING){
-			pidtable->pid_status[child_pid] = ORPHAN;
-		}
-		/* If the child isn't running, it's a zombie. Remove it here*/
-		else{
-			pidtable->pid_available++;
-			pidtable->pid_procs[child_pid] = NULL;
-			pidtable->pid_status[child_pid] = READY;
-			pidtable->pid_waitcode[child_pid] = (int) NULL;
-			proc_destroy(child);
-		}
-
-	}
-
-	/*
-	* Now update the status of the given process.
-	*/
+	pidtable_update_children(proc);
 
 	/* Case: Signal the parent that the child ended with waitcode given. */
 	if(pidtable->pid_status[proc->pid] == RUNNING){
+		proc_remthread(curthread);
 		pidtable->pid_status[proc->pid] = ZOMBIE;
 		pidtable->pid_waitcode[proc->pid] = waitcode;
 	}
@@ -557,7 +549,8 @@ pidtable_remove(struct proc *proc, int32_t waitcode)
 		pidtable->pid_procs[proc->pid] = NULL;
 		pidtable->pid_status[proc->pid] = READY;
 		pidtable->pid_waitcode[proc->pid] = (int) NULL;
-		proc_destroy(proc);
+		proc_remthread(curthread);
+		proc_destroy(curproc);
 	}
 	else{
 		panic("Tried to remove a bad process.\n");
@@ -569,6 +562,39 @@ pidtable_remove(struct proc *proc, int32_t waitcode)
 	lock_release(pidtable->pid_lock);
 
 	return;
+}
+
+/*
+ * Will update the status of children to either ORPHAN or ZOMBIE.
+ */
+void
+pidtable_update_children(struct proc *proc)
+{
+	int num_child = array_num(proc->children);
+	/* Loop downwards as removing children will cause array shrinking and disrupt indexing */
+	for(int i = num_child-1; i >= 0; i--){
+
+		struct proc *child = array_get(proc->children, i);
+		KASSERT(child != NULL);
+		int child_pid = child->pid;
+		/* Signal to the child we don't need it anymore */
+		if(pidtable->pid_status[child_pid] == RUNNING){
+			pidtable->pid_status[child_pid] = ORPHAN;
+		}
+		else if (pidtable->pid_status[child_pid] == ZOMBIE){
+			//struct thread *child_thread = threadarray_get(&child->p_threads, 0);
+			proc_destroy(child);
+			pidtable->pid_available++;
+			pidtable->pid_procs[proc->pid] = NULL;
+			pidtable->pid_status[proc->pid] = READY;
+			pidtable->pid_waitcode[proc->pid] = (int) NULL;
+			//proc_remthread(child_thread);
+
+		}
+		else{
+			panic("We tried to modify a child that did not exist.\n");
+		}
+	}
 }
 
 int
@@ -589,7 +615,14 @@ sys_waitpid(int32_t *retval0)
 int
 sys__exit(int32_t waitcode)
 {
-	pidtable_remove(curproc, waitcode);
+	//lock_acquire(pidtable->pid_lock);
+	(void) waitcode;
+	pidtable_exit(curproc, waitcode);
+	//proc_remthread(curthread);
+	//proc_destroy(curproc);
+
+	//lock_release(pidtable->pid_lock);
+	//thread_exit();
 	return 0;
 }
 

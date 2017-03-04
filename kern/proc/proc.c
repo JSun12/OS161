@@ -563,6 +563,7 @@ pidtable_exit(struct proc *proc, int32_t waitcode)
 
 	lock_release(pidtable->pid_lock);
 
+	// We might want to synchronize this more
 	thread_exit();
 }
 

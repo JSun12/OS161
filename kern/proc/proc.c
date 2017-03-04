@@ -629,10 +629,36 @@ sys_getpid(int32_t *retval0)
 }
 
 int
-sys_waitpid(pid_t pid, int32_t *retval0)
+sys_waitpid(pid_t pid, int32_t *retval0, int32_t options)
 {
-	int status;
-	int waitcode;
+	int status; // The status of the process which is being waited upon
+	int waitcode; // The reason for process exit as defined in wait.h
+
+	/* Check that we are calling a valid options argument. Currently this is only 0. */
+	if (options != 0){
+		return EINVAL;
+	}
+
+	/* Check that this is a valid process. This includes checking bounds and ensuring
+	 * that the pid_status is not empty (ie. READY to run)
+	 */
+	if (pid < PID_MIN || pid > PID_MAX || pidtable->pid_status[pid] == READY){
+		return ESRCH;
+	}
+
+	/* Check that the pid being called is a child of the current process */
+	int ischild = 0;
+	struct proc *child = pidtable->pid_procs[pid];
+	int parentnum = array_num(curproc->children);
+	for (int i = 0; i < parentnum; i++){
+		if (child == array_get(curproc->children, i)){
+			ischild = 1;
+			break;
+		}
+	}
+	if(ischild == 0){
+		return ECHILD;
+	}
 
 	lock_acquire(pidtable->pid_lock);
 
@@ -647,21 +673,23 @@ sys_waitpid(pid_t pid, int32_t *retval0)
 
 	lock_release(pidtable->pid_lock);
 
-	/* Ensure that we have a place to store the return value*/
+	/* It is allowed for the return value to point to NULL. If this is the case, avoid setting it. */
 	if(retval0 != NULL){
-		*retval0 = waitcode;
+		/* Safely copy the kernel's waitcode to the user space */
+		int ret = copyout(&waitcode, (userptr_t) retval0, sizeof(int32_t));
+		if (ret){
+			return ret;
+		}
 	}
 
 	return 0;
 }
 
-int
+void
 sys__exit(int32_t waitcode)
 {
 	pidtable_exit(curproc, waitcode);
-
 	panic("Exit syscall should never get to this point.");
-	return 0;
 }
 
 // make sure to free the trapframe in the heap.

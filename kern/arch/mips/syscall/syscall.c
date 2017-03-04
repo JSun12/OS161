@@ -158,16 +158,17 @@ syscall(struct trapframe *tf)
 		err = sys_getpid(&retval0);
 		break;
 
-		case SYS_execv: 
+		case SYS_execv:
 		err = sys_execv((const char *) tf->tf_a0, (char **) tf->tf_a1);
 		break;
-		
+
 		case SYS_waitpid:
-		err = sys_waitpid((pid_t)tf->tf_a0, &retval0);
+		err = sys_waitpid((pid_t)tf->tf_a0, (int32_t *) tf->tf_a1, (int32_t) tf->tf_a2);
 		break;
 
 		case SYS__exit:
-		err = sys__exit((int)tf->tf_a0);
+		sys__exit((int)tf->tf_a0);
+		panic("The exit syscall should never return");
 		break;
 
 	    default:

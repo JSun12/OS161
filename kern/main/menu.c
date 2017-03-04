@@ -138,11 +138,10 @@ common_prog(int nargs, char **args)
 	}
 
 	/*
-	 * The new process will be destroyed when the program exits...
-	 * once you write the code for handling that.
-	 */
+	* Wait for the new process to finish before continuing with the menu thread.
+	*/
 
-	sys_waitpid(proc->pid, NULL);
+	sys_waitpid(proc->pid, NULL, 0);
 
 	return 0;
 }

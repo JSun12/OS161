@@ -712,17 +712,17 @@ enter_usermode(void *data1, unsigned long data2)
 
 // this may be null terminated with garbage;
 static
-int 
+int
 null_terminated(char *s, int max_len)
-{	
-	int i = 0; 
+{
+	int i = 0;
 	while (s[i] != 0 && i < max_len) i++;
-	
+
 	if (s[i] != 0) {
-		return -1; 
+		return -1;
 	}
-	
-	return i; 
+
+	return i;
 }
 
 int
@@ -737,7 +737,7 @@ sys_execv(const char *prog, char **args)
 	kprintf("%s\n", args[1]);
 
 	//TODO: stop at argmax; assume arguments must have at least one byte.
-	int i = 0; 
+	int i = 0;
 	while(args[i] != NULL) i++;
 	int argc = i;
 
@@ -814,7 +814,7 @@ sys_execv(const char *prog, char **args)
 	userptr_t arg_addr = (userptr_t) (stackptr - argc*sizeof(userptr_t *));
 	args_out = (userptr_t *) (stackptr - argc*sizeof(userptr_t *));
 	for (i = 0; i < argc; i++) {
-		arg_addr -= size[i]; 
+		arg_addr -= size[i];
 		arg_addr -= ((int) arg_addr % 4);
 		*args_out = arg_addr;
 		path_len = kmalloc(sizeof(int));
@@ -824,7 +824,7 @@ sys_execv(const char *prog, char **args)
 
 	args_out = (userptr_t *) (stackptr - argc*sizeof(int));
 	stackptr = (vaddr_t) arg_addr;
-	
+
 
 	/* Warp to user mode. */
 	enter_new_process(argc - 1, (userptr_t) args_out,

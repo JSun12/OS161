@@ -85,7 +85,7 @@ struct pidtable {
 
 /* Initializes the pid table*/
 void pidtable_bootstrap(void);
-int pidtable_find(struct proc *);
+int pidtable_pid_status(pid_t);
 int pidtable_add(struct proc *);
 void pidtable_exit(struct proc *, int32_t);
 void pidtable_update_children(struct proc *proc);
@@ -118,7 +118,7 @@ struct addrspace *proc_setas(struct addrspace *);
 /* Process syscalls */
 int sys_fork(struct trapframe *, int32_t *);
 int sys_getpid(int32_t *);
-int sys_waitpid(int32_t *);
+int sys_waitpid(pid_t, int32_t *);
 int sys__exit(int32_t);
 //int assign_pid(struct proc *, int32_t *);
 void enter_usermode(void *, unsigned long);

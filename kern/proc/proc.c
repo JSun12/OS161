@@ -706,21 +706,57 @@ enter_usermode(void *data1, unsigned long data2)
 }
 
 
+
+
+
+
+// this may be null terminated with garbage;
+static
+int 
+null_terminated(char *s, int max_len)
+{	
+	int i = 0; 
+	while (s[i] != 0 && i < max_len) i++;
+	
+	if (s[i] != 0) {
+		return -1; 
+	}
+	
+	return i; 
+}
+
 int
 sys_execv(const char *prog, char **args)
 {
-	kprintf("%s\n", args[1]);
-
 	char *progname;
 	size_t *path_len;
-	progname = kmalloc(PATH_MAX);
+	progname = kmalloc(PATH_MAX*sizeof(char));
     path_len = kmalloc(sizeof(int));
 	copyinstr((const_userptr_t) prog, progname, PATH_MAX, path_len);
 	kprintf("%s\n", progname);
+	kprintf("%s\n", args[1]);
 
-	int i = 0;
+	//TODO: stop at argmax; assume arguments must have at least one byte.
+	int i = 0; 
 	while(args[i] != NULL) i++;
-	int argc = i -1;
+	int argc = i;
+
+	char *args_in[argc];
+	int size[argc];
+
+	//TODO: lower the ARG_MAX for every arg read.
+	for (i = 0; i < argc; i++) {
+		int cur_size = null_terminated(args[i], ARG_MAX);
+		if (cur_size < 0) {
+			return -1; // error
+		}
+
+		cur_size++;
+		size[i] = cur_size;
+		args_in[i] = kmalloc(cur_size*sizeof(char));
+		path_len = kmalloc(sizeof(int));
+		copyinstr((const_userptr_t) args[i], args_in[i], (size_t) cur_size, path_len);
+	}
 
 	struct addrspace *as;
 
@@ -749,8 +785,6 @@ sys_execv(const char *prog, char **args)
 		vfs_close(v);
 		return ENOMEM;
 	}
-	// kprintf("hello\n");
-	// kprintf("%s\n", args[0]);
 
 	/* Switch to it and activate it. */
 	proc_setas(as);
@@ -774,8 +808,26 @@ sys_execv(const char *prog, char **args)
 		return result;
 	}
 
+	kprintf("%s\n", args_in[0]);
+
+	userptr_t *args_out;
+	userptr_t arg_addr = (userptr_t) (stackptr - argc*sizeof(userptr_t *));
+	args_out = (userptr_t *) (stackptr - argc*sizeof(userptr_t *));
+	for (i = 0; i < argc; i++) {
+		arg_addr -= size[i]; 
+		arg_addr -= ((int) arg_addr % 4);
+		*args_out = arg_addr;
+		path_len = kmalloc(sizeof(int));
+		copyoutstr((const char *) args_in[i], arg_addr, (size_t) size[i], path_len);
+		args_out++;
+	}
+
+	args_out = (userptr_t *) (stackptr - argc*sizeof(int));
+	stackptr = (vaddr_t) arg_addr;
+	
+
 	/* Warp to user mode. */
-	enter_new_process(argc, (userptr_t) args,
+	enter_new_process(argc - 1, (userptr_t) args_out,
 			  NULL /*userspace addr of environment*/,
 			  stackptr, entrypoint);
 

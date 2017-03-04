@@ -257,10 +257,11 @@ proc_create_runprogram(const char *name)
 		return NULL;
 	}
 
-	//XXX: Make this cleaner
-	newproc->pid = pidtable_add(newproc);
-	if(newproc->pid == -1){
-		panic("Could not add new process to pid table");
+	ret = pidtable_add(newproc, &newproc->pid);
+	if(ret){
+		ft_destroy(newproc->proc_ft)
+		kfree(newproc);
+		return NULL;
 	}
 
 	/* VM fields */
@@ -402,7 +403,7 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 {
 	struct proc *new_proc;
 	struct trapframe *new_tf;
-	int result;
+	int ret;
 
 	new_proc = proc_create("new_proc");
 	if (new_proc == NULL) {
@@ -415,9 +416,9 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 		return ENOMEM;
 	}
 
-	result = as_copy(curproc->p_addrspace, &new_proc->p_addrspace);
-	if (result) {
-		return result;
+	ret = as_copy(curproc->p_addrspace, &new_proc->p_addrspace);
+	if (ret) {
+		return ret;
 	}
 
 	spinlock_acquire(&curproc->p_lock);
@@ -427,12 +428,12 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 	}
 	spinlock_release(&curproc->p_lock);
 
-	new_proc->pid = pidtable_add(new_proc);
-	if(new_proc->pid == -1){
-		return ENPROC;
+	ret = pidtable_add(new_proc, &new_proc->pid);
+	if (ret){
+		kfree(new_tf);
+		kfree(new_proc);
+		return ret;
 	}
-	*retval0 = new_proc->pid;
-	//TODO: clean up if this fails
 
 	struct ft *ft = curproc->proc_ft;
 	lock_acquire(ft->ft_lock);
@@ -487,8 +488,12 @@ pidtable_bootstrap()
 	}
 }
 
+/*
+ * Will add a process to the filetable and return the number in the retval input. Errors will be
+ * passed through the integer output following the format of the other system calls.
+ */
 int
-pidtable_add(struct proc *proc)
+pidtable_add(struct proc *proc, int32_t *retval)
 {
 	int output;
 	int next;
@@ -508,6 +513,7 @@ pidtable_add(struct proc *proc)
 
 		if(pidtable->pid_available > 0){
 			for (int i = next; i < PID_MAX; i++){
+				/* Find the next available PID */
 				if (pidtable->pid_status[i] == READY){
 					pidtable->pid_next = i;
 					break;
@@ -515,7 +521,12 @@ pidtable_add(struct proc *proc)
 			}
 		}
 		else{
-			pidtable->pid_next = -1; // Full signal
+			/*
+			 * Update pid_next to reflect that the table it full. The value we set it to is beyond
+			 * PID_MAX as when we remove, we update pid_next to be the lowest possible pid value we
+			 * have, which is always under PID_MAX + 1.
+			 */
+			pidtable->pid_next = PID_MAX + 1;
 		}
 	}
 	else{
@@ -526,20 +537,6 @@ pidtable_add(struct proc *proc)
 	lock_release(pidtable->pid_lock);
 
 	return output;
-}
-
-
-//TODO: Remove this unused call
-int
-pidtable_pid_status(pid_t pid)
-{
-	int status;
-
-	lock_acquire(pidtable->pid_lock);
-	status = pidtable->pid_status[pid];
-	lock_release(pidtable->pid_lock);
-
-	return status;
 }
 
 /*
@@ -586,25 +583,29 @@ pidtable_exit(struct proc *proc, int32_t waitcode)
 void
 pidtable_update_children(struct proc *proc)
 {
+	/* We assume that a function holding a lock calls this function */
+	KASSERT(lock_do_i_hold(pidtable->pid_lock));
+
 	int num_child = array_num(proc->children);
 	/* Loop downwards as removing children will cause array shrinking and disrupt indexing */
 	for(int i = num_child-1; i >= 0; i--){
 
 		struct proc *child = array_get(proc->children, i);
-		KASSERT(child != NULL);
 		int child_pid = child->pid;
 		/* Signal to the child we don't need it anymore */
 		if(pidtable->pid_status[child_pid] == RUNNING){
 			pidtable->pid_status[child_pid] = ORPHAN;
 		}
 		else if (pidtable->pid_status[child_pid] == ZOMBIE){
-			//struct thread *child_thread = threadarray_get(&child->p_threads, 0);
+			/* Update the next pid indicator */
+			if(child_pid < pidtable->pid_next){
+				pidtable->pid_next = child_pid;
+			}
 			pidtable->pid_available++;
 			pidtable->pid_procs[child->pid] = NULL;
 			pidtable->pid_status[child->pid] = READY;
 			pidtable->pid_waitcode[child->pid] = (int) NULL;
 			proc_destroy(child);
-			//proc_remthread(child_thread);
 		}
 		else{
 			panic("Tried to modify a child that did not exist.\n");
@@ -626,19 +627,25 @@ sys_getpid(int32_t *retval0)
 int
 sys_waitpid(pid_t pid, int32_t *retval0)
 {
+	int status;
+	int waitcode;
+
 	lock_acquire(pidtable->pid_lock);
 
-	int status = pidtable->pid_status[pid];
+	status = pidtable->pid_status[pid];
 
 	while(status != ZOMBIE){
 		cv_wait(pidtable->pid_cv, pidtable->pid_lock);
 		status = pidtable->pid_status[pid];
 	}
+	/* Obtain the waitcode before leaving the lock */
+	waitcode = pidtable->pid_waitcode[pid];
 
 	lock_release(pidtable->pid_lock);
 
+	/* Ensure that we have a place to store the return value*/
 	if(retval0 != NULL){
-		*retval0 = status;
+		*retval0 = waitcode;
 	}
 
 	return 0;
@@ -679,22 +686,22 @@ sys_execv(const char *prog, char **args)
 	copyinstr((const_userptr_t) prog, progname, PATH_MAX, path_len);
 	kprintf("%s\n", progname);
 
-	int i = 0; 
+	int i = 0;
 	while(args[i] != NULL) i++;
 	int argc = i -1;
 
-	struct addrspace *as;	
+	struct addrspace *as;
 
 	// threadarray_cleanup(&proc->p_threads);
 	// threadarray_init(&proc->p_threads);
 	as = proc_setas(NULL);
 	as_deactivate();
 	as_destroy(as);
-	
+
 	struct vnode *v;
 	vaddr_t entrypoint, stackptr;
 	int result;
-	
+
 	/* Open the file. */
 	result = vfs_open(progname, O_RDONLY, 0, &v);
 	if (result) {
@@ -715,7 +722,7 @@ sys_execv(const char *prog, char **args)
 
 	/* Switch to it and activate it. */
 	proc_setas(as);
-	as_activate();	
+	as_activate();
 
 	/* Load the executable. */
 	result = load_elf(v, &entrypoint);
@@ -733,7 +740,7 @@ sys_execv(const char *prog, char **args)
 	if (result) {
 		/* p_addrspace will go away when curproc is destroyed */
 		return result;
-	}	
+	}
 
 	/* Warp to user mode. */
 	enter_new_process(argc, (userptr_t) args,

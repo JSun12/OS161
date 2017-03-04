@@ -643,8 +643,7 @@ enter_usermode(void *data1, unsigned long data2)
 int
 sys_execv(const char *prog, char **args)
 {
-	// kprintf("%s\n", args[1]);
-	// kprintf("hello\n");
+	kprintf("%s\n", args[1]);
 
 	char *progname;
 	size_t *path_len;

@@ -454,6 +454,8 @@ docommand(char *buf, struct exitinfo *ei)
 		return;
 	}
 
+	while(1);
+
 	if (waitpid(pid, &status, 0) < 0) {
 		warn("waitpid");
 		exitinfo_exit(ei, 255);

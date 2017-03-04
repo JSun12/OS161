@@ -259,7 +259,7 @@ proc_create_runprogram(const char *name)
 
 	ret = pidtable_add(newproc, &newproc->pid);
 	if(ret){
-		ft_destroy(newproc->proc_ft)
+		ft_destroy(newproc->proc_ft);
 		kfree(newproc);
 		return NULL;
 	}
@@ -434,6 +434,7 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 		kfree(new_proc);
 		return ret;
 	}
+	*retval0 = new_proc->pid;
 
 	struct ft *ft = curproc->proc_ft;
 	lock_acquire(ft->ft_lock);
@@ -446,9 +447,9 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 	new_tf->tf_a3 = 0;      /* signal no error */
 	new_tf->tf_epc += 4;
 
-	result = thread_fork("new_thread", new_proc, enter_usermode, new_tf, 1);
-	if (result) {
-		return result;
+	ret = thread_fork("new_thread", new_proc, enter_usermode, new_tf, 1);
+	if (ret) {
+		return ret;
 	}
 
 	return 0;
@@ -505,11 +506,13 @@ pidtable_add(struct proc *proc, int32_t *retval)
 
 	if(pidtable->pid_available > 0){
 		next = pidtable->pid_next;
+		*retval = next;
+		output = 0;
+
 		pidtable->pid_procs[next] = proc;
 		pidtable->pid_status[next] = RUNNING;
 		pidtable->pid_waitcode[next] = (int) NULL;
 		pidtable->pid_available--;
-		output = next;
 
 		if(pidtable->pid_available > 0){
 			for (int i = next; i < PID_MAX; i++){
@@ -530,8 +533,9 @@ pidtable_add(struct proc *proc, int32_t *retval)
 		}
 	}
 	else{
-		output = -1;
-		panic("PID table full!\n");
+		/* The PID table is full*/
+		retval = NULL;
+		output = ENPROC;
 	}
 
 	lock_release(pidtable->pid_lock);

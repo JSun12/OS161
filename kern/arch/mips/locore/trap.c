@@ -40,6 +40,7 @@
 #include <mainbus.h>
 #include <syscall.h>
 #include <proc.h>
+#include <kern/wait.h>
 
 /* in exception-*.S */
 extern __DEAD void asm_usermode(struct trapframe *tf);
@@ -112,11 +113,10 @@ kill_curthread(vaddr_t epc, unsigned code, vaddr_t vaddr)
 	 * You will probably want to change this.
 	 */
 
-	 (void) sig;
 	 (void) epc;
 	 (void) vaddr;
 	/* Ask the kernel to remove this process */
-	sys__exit(1);
+	sys__exit(_MKWAIT_SIG(sig));
 
 	//kprintf("Fatal user mode trap %u sig %d (%s, epc 0x%x, vaddr 0x%x)\n",
 	//	code, sig, trapcodenames[code], epc, vaddr);

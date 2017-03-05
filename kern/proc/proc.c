@@ -493,6 +493,8 @@ enter_usermode(void *data1, unsigned long data2)
 
 
 
+
+
 void
 pidtable_bootstrap()
 {
@@ -733,6 +735,13 @@ sys__exit(int32_t waitcode)
 
 
 
+
+
+
+
+
+
+
 int
 sys_execv(const char *prog, char **args)
 {
@@ -757,8 +766,8 @@ sys_execv(const char *prog, char **args)
 		return ret;
 	}
 
-	char *args_in[argc];
-	int size[argc];
+	char **args_in = kmalloc(argc*sizeof(char *));
+	int *size = kmalloc(argc*sizeof(int));
 	ret = copy_in_args(argc, args, args_in, size);
 	if (ret) {
 		return ret;
@@ -865,7 +874,7 @@ Copies the user strings into ther kernel, populating size[] with their respectiv
 Returns an error if bytes surpasses ARG_MAX.
 */
 int
-copy_in_args(int argc, char **args, char *args_in[], int size[])
+copy_in_args(int argc, char **args, char **args_in, int *size)
 {
 	int arg_size_left = ARG_MAX;
 	size_t cur_size;	
@@ -889,16 +898,16 @@ copy_in_args(int argc, char **args, char *args_in[], int size[])
 Copies the kernel strings out to the user stack, and cleans up the kernel strings.
 */
 void
-copy_out_args(int argc, char *args_in[], int size[], vaddr_t *stackptr, userptr_t *args_out_addr)
+copy_out_args(int argc, char **args, int *size, vaddr_t *stackptr, userptr_t *args_out_addr)
 {
 	userptr_t arg_addr = (userptr_t) (*stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
 	userptr_t *args_out = (userptr_t *) (*stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
 	for (int i = 0; i < argc; i++) {
 		arg_addr -= size[i]; 
 		*args_out = arg_addr;
-		string_out((const char *) args_in[i], arg_addr, (size_t) size[i]);
+		string_out((const char *) args[i], arg_addr, (size_t) size[i]);
 		args_out++;
-		kfree(args_in[i]);
+		kfree(args[i]);
 	}
 
 	*args_out = NULL;

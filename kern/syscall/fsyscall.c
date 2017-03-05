@@ -98,7 +98,7 @@ sys_close(int fd)
 	}
 
 	free_fd(ft, fd);
-	
+
 	lock_release(ft->ft_lock);
 	return 0;
 }
@@ -118,7 +118,7 @@ sys_write(int fd, const void *buf, size_t nbytes, int32_t *retval0)
 
 	lock_acquire(ft->ft_lock);
 	if (!fd_valid_and_used(ft, fd)) {
-		lock_acquire(ft->ft_lock);
+		lock_release(ft->ft_lock);
 		return EBADF;
 	}
 
@@ -173,7 +173,7 @@ sys_read(int fd, void *buf, size_t buflen, ssize_t *retval0)
 
 	lock_acquire(ft->ft_lock);
 	if (!fd_valid_and_used(ft, fd)) {
-		lock_acquire(ft->ft_lock);
+		lock_release(ft->ft_lock);
 		return EBADF;
 	}
 
@@ -299,14 +299,14 @@ sys_dup2(int oldfd, int newfd, int *output)
 		return EBADF;
 	}
 
-	entry = ft->entries[oldfd];	
+	entry = ft->entries[oldfd];
 
 	if (fd_valid_and_used(ft, newfd)){
 		free_fd(ft, newfd);
 	}
 
 	assign_fd(ft, entry, newfd);
-	lock_release(ft->ft_lock);	
+	lock_release(ft->ft_lock);
     *output = newfd;
 
 	return 0;

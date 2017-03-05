@@ -401,7 +401,7 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 	struct proc *new_proc;
 	int ret;	
 
-	ret = proc_create_fork(&new_proc); 
+	ret = proc_create_fork("new_proc", &new_proc); 
 	if(ret) {
 		return ret;
 	}		
@@ -427,11 +427,11 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 }
 
 int
-proc_create_fork(struct proc **new_proc)
+proc_create_fork(const char *name, struct proc **new_proc)
 {
 	int ret;
 
-	*new_proc = proc_create("new_proc");
+	*new_proc = proc_create(name);
 	if (*new_proc == NULL) {
 		return ENOMEM;
 	}
@@ -733,36 +733,104 @@ sys__exit(int32_t waitcode)
 
 
 
-
-
-// this may be null terminated with garbage;
-static
-int 
-null_terminated(char *s, int max_len)
-{	
-	int i = 0; 
-	while (s[i] != 0 && i < max_len) i++;
-
-	if (s[i] != 0) {
-		return -1; 
-	}
-	
-	return i; 
-}
-
 int
 sys_execv(const char *prog, char **args)
 {
+	int ret;	
+	
 	if (prog == NULL || args == NULL) {
 		return EFAULT;
 	}
 
 	char *progname;
-	size_t *path_len;
-	progname = kmalloc(PATH_MAX*sizeof(char));
-    path_len = kmalloc(sizeof(int));
-	copyinstr((const_userptr_t) prog, progname, PATH_MAX, path_len);
+	size_t length;
+	ret = strlen_check(prog, PATH_MAX - 1, &length);
+	if (ret) {
+		return ret;
+	}
 
+	string_in(prog, &progname, length);
+
+	int argc;
+	ret = get_argc(args, &argc);
+	if (ret) {
+		return ret;
+	}
+
+	char *args_in[argc];
+	int size[argc];
+	ret = copy_in_args(argc, args, args_in, size);
+	if (ret) {
+		return ret;
+	}
+
+	struct vnode *v;
+	vaddr_t entrypoint, stackptr;
+
+	ret = vfs_open(progname, O_RDONLY, 0, &v);
+	if (ret) {
+		return ret;
+	}
+
+	struct addrspace *as;
+	as = proc_setas(NULL);
+	as_deactivate();
+	as_destroy(as);
+
+	KASSERT(proc_getas() == NULL);
+
+	as = as_create();
+	if (as == NULL) {
+		return ENOMEM;
+	}
+
+	proc_setas(as);
+	as_activate();
+
+	ret = load_elf(v, &entrypoint);
+	if (ret) {
+		vfs_close(v);
+		return ret;
+	}
+
+	vfs_close(v);
+
+	ret = as_define_stack(as, &stackptr);
+	if (ret) {
+		return ret;
+	}	
+
+	userptr_t args_out_addr;
+	copy_out_args(argc, args_in, size, &stackptr, &args_out_addr);
+	
+	enter_new_process(argc, args_out_addr, NULL, stackptr, entrypoint);
+
+	/* enter_new_process does not return. */
+	panic("enter_new_process returned\n");
+	return EINVAL;
+}
+
+/*
+Checks to make sure the user string is less than max_len. If it is, then
+actual_length holds true length (not including null terminator). 
+*/
+int 
+strlen_check(const char *string, int max_len, size_t *actual_length)
+{	
+	int i = 0; 
+	while (string[i] != 0 && i < max_len) i++;
+
+	if (string[i] != 0) {
+		return E2BIG; 
+	}
+	
+	*actual_length = i; 
+	return 0; 
+}
+
+int
+get_argc(char **args, int *argc)
+{
 	int i = 0; 
 	while(args[i] != NULL && i < ARG_MAX) i++;
 
@@ -770,94 +838,70 @@ sys_execv(const char *prog, char **args)
 		return E2BIG;
 	}
 
-	int argc = i;
+	*argc = i;
+	return 0;
+}
 
-	char *args_in[argc];
-	int size[argc];
+void
+string_in(const char *user_src, char **kern_dest, size_t copy_size)
+{
+	copy_size++;
+	*kern_dest = kmalloc(copy_size*sizeof(char));
+    size_t *path_len = kmalloc(sizeof(int));
+	copyinstr((const_userptr_t) user_src, *kern_dest, copy_size, path_len);
+	kfree(path_len);
+}
+
+void 
+string_out(const char *kernel_src, userptr_t user_dest, size_t copy_size)
+{
+	size_t *path_len = kmalloc(sizeof(int));
+	copyoutstr(kernel_src, user_dest, copy_size, path_len);
+	kfree(path_len);
+}
+
+/*
+Copies the user strings into ther kernel, populating size[] with their respective lengths. 
+Returns an error if bytes surpasses ARG_MAX.
+*/
+int
+copy_in_args(int argc, char **args, char *args_in[], int size[])
+{
 	int arg_size_left = ARG_MAX;
-	int cur_size;	
+	size_t cur_size;	
+	int ret;
 
-	for (i = 0; i < argc; i++) {
-		cur_size = null_terminated(args[i], arg_size_left - 1);
-		if (cur_size < 0) {
-			return E2BIG;
+	for (int i = 0; i < argc; i++) {
+		ret = strlen_check((const char *) args[i], arg_size_left - 1, &cur_size);
+		if (ret) {
+			return ret;
 		}
 
-		cur_size++;
-		arg_size_left -= cur_size;
-		size[i] = cur_size;
-		args_in[i] = kmalloc(cur_size*sizeof(char));
-		copyinstr((const_userptr_t) args[i], args_in[i], (size_t) cur_size, path_len);
+		arg_size_left -= (cur_size + 1);
+		size[i] = (int) cur_size + 1;
+		string_in((const char *) args[i], &args_in[i], cur_size);
 	}
 
-	struct addrspace *as;
+	return 0;
+}
 
-	as = proc_setas(NULL);
-	as_deactivate();
-	as_destroy(as);
-
-	struct vnode *v;
-	vaddr_t entrypoint, stackptr;
-	int result;
-
-	/* We should be a new process. */
-	KASSERT(proc_getas() == NULL);
-
-	/* Create a new address space. */
-	as = as_create();
-	if (as == NULL) {
-		vfs_close(v);
-		return ENOMEM;
-	}
-
-	/* Open the file. */
-	result = vfs_open(progname, O_RDONLY, 0, &v);
-	if (result) {
-		return result;
-	}
-
-	/* Switch to it and activate it. */
-	proc_setas(as);
-	as_activate();
-
-	/* Load the executable. */
-	result = load_elf(v, &entrypoint);
-	if (result) {
-		/* p_addrspace will go away when curproc is destroyed */
-		vfs_close(v);
-		return result;
-	}
-
-	/* Done with the file now. */
-	vfs_close(v);
-
-	/* Define the user stack in the address space */
-	result = as_define_stack(as, &stackptr);
-	if (result) {
-		/* p_addrspace will go away when curproc is destroyed */
-		return result;
-	}	
-
-	//TODO clean up copied args
-
-	userptr_t arg_addr = (userptr_t) (stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
-	userptr_t *args_out = (userptr_t *) (stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
-	for (i = 0; i < argc; i++) {
+/*
+Copies the kernel strings out to the user stack, and cleans up the kernel strings.
+*/
+void
+copy_out_args(int argc, char *args_in[], int size[], vaddr_t *stackptr, userptr_t *args_out_addr)
+{
+	userptr_t arg_addr = (userptr_t) (*stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
+	userptr_t *args_out = (userptr_t *) (*stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
+	for (int i = 0; i < argc; i++) {
 		arg_addr -= size[i]; 
 		*args_out = arg_addr;
-		path_len = kmalloc(sizeof(int));
-		copyoutstr((const char *) args_in[i], arg_addr, (size_t) size[i], path_len);
+		string_out((const char *) args_in[i], arg_addr, (size_t) size[i]);
 		args_out++;
 		kfree(args_in[i]);
 	}
 
 	*args_out = NULL;
-	args_out = (userptr_t *) (stackptr - argc*sizeof(int) - sizeof(NULL));
-	stackptr = (vaddr_t) arg_addr;
-	
-	enter_new_process(argc, (userptr_t) args_out, NULL, stackptr, entrypoint);
-
-	/* enter_new_process does not return. */
-	panic("enter_new_process returned\n");
-	return EINVAL;
+	*args_out_addr = (userptr_t) (*stackptr - argc*sizeof(int) - sizeof(NULL));
+	*stackptr = (vaddr_t) arg_addr;
 }

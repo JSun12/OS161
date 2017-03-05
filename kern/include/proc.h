@@ -116,11 +116,14 @@ struct addrspace *proc_setas(struct addrspace *);
 
 /* Process syscalls */
 int sys_fork(struct trapframe *, int32_t *);
+int proc_create_fork(struct proc **);
+int setup_forked_trapframe(struct trapframe *, struct trapframe **);
+void enter_usermode(void *, unsigned long);
+
 int sys_getpid(int32_t *);
 int sys_waitpid(pid_t, int32_t *, int32_t);
 void sys__exit(int32_t);
 //int assign_pid(struct proc *, int32_t *);
-void enter_usermode(void *, unsigned long);
 
 int sys_execv(const char *, char **);
 

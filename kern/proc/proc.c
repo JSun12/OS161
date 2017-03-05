@@ -395,65 +395,101 @@ proc_setas(struct addrspace *newas)
 }
 
 
-/*
-TODO: set address spaces, properly
-*/
 int
 sys_fork(struct trapframe *tf, int32_t *retval0)
 {
 	struct proc *new_proc;
+	int ret;	
+
+	ret = proc_create_fork(&new_proc); 
+	if(ret) {
+		return ret;
+	}		
+
+	ret = pidtable_add(new_proc, &new_proc->pid);
+	if (ret){
+		proc_destroy(new_proc);
+		return ret;
+	}
+
 	struct trapframe *new_tf;
+	setup_forked_trapframe(tf, &new_tf);
+
+	*retval0 = new_proc->pid;
+	ret = thread_fork("new_thread", new_proc, enter_usermode, new_tf, 1);
+	if (ret) {
+		proc_destroy(new_proc);
+		kfree(new_tf);
+		return ret;
+	}
+
+	return 0;
+}
+
+int
+proc_create_fork(struct proc **new_proc)
+{
 	int ret;
 
-	new_proc = proc_create("new_proc");
-	if (new_proc == NULL) {
+	*new_proc = proc_create("new_proc");
+	if (*new_proc == NULL) {
 		return ENOMEM;
 	}
-
-	new_tf = kmalloc(sizeof(struct trapframe));
-	if (new_tf == NULL) {
-		kfree(new_proc);
-		return ENOMEM;
-	}
-
-	ret = as_copy(curproc->p_addrspace, &new_proc->p_addrspace);
+ 
+	ret = as_copy(curproc->p_addrspace, &(*new_proc)->p_addrspace);
 	if (ret) {
+		proc_destroy(*new_proc);
 		return ret;
 	}
 
 	spinlock_acquire(&curproc->p_lock);
 	if (curproc->p_cwd != NULL) {
 		VOP_INCREF(curproc->p_cwd);
-		new_proc->p_cwd = curproc->p_cwd;
+		(*new_proc)->p_cwd = curproc->p_cwd;
 	}
 	spinlock_release(&curproc->p_lock);
 
-	ret = pidtable_add(new_proc, &new_proc->pid);
-	if (ret){
-		kfree(new_tf);
-		kfree(new_proc);
-		return ret;
-	}
-	*retval0 = new_proc->pid;
-
 	struct ft *ft = curproc->proc_ft;
 	lock_acquire(ft->ft_lock);
-	ft_copy(ft, new_proc->proc_ft);
+	ft_copy(ft, (*new_proc)->proc_ft);
 	lock_release(ft->ft_lock);
-
-	memcpy((void *) new_tf, (const void *) tf, sizeof(struct trapframe));
-	new_tf->tf_v0 = 0;
-	new_tf->tf_v1 = 0;
-	new_tf->tf_a3 = 0;      /* signal no error */
-	new_tf->tf_epc += 4;
-
-	ret = thread_fork("new_thread", new_proc, enter_usermode, new_tf, 1);
-	if (ret) {
-		return ret;
-	}
 
 	return 0;
 }
+
+int
+setup_forked_trapframe(struct trapframe *old_tf, struct trapframe **new_tf)
+{
+	*new_tf = kmalloc(sizeof(struct trapframe));
+	if (*new_tf == NULL) {
+		return ENOMEM;
+	}	
+
+	memcpy((void *) *new_tf, (const void *) old_tf, sizeof(struct trapframe));
+	(*new_tf)->tf_v0 = 0;
+	(*new_tf)->tf_v1 = 0;
+	(*new_tf)->tf_a3 = 0;      /* signal no error */
+	(*new_tf)->tf_epc += 4;
+
+	return 0;
+}
+
+void
+enter_usermode(void *data1, unsigned long data2)
+{
+	(void) data2;
+	void *tf = (void *) curthread->t_stack + 16;
+
+	memcpy(tf, (const void *) data1, sizeof(struct trapframe));
+	kfree((struct trapframe *) data1);
+	
+	as_activate();
+	mips_usermode(tf);
+}
+
+
+
+
 
 
 
@@ -497,7 +533,7 @@ pidtable_bootstrap()
  */
 int
 pidtable_add(struct proc *proc, int32_t *retval)
-{
+{	
 	int output;
 	int next;
 
@@ -506,7 +542,7 @@ pidtable_add(struct proc *proc, int32_t *retval)
 	// Add the given process to the parent
 	array_add(curproc->children, proc, NULL);
 
-	if(pidtable->pid_available > 0){
+	if(pidtable->pid_available > 0){		
 		next = pidtable->pid_next;
 		*retval = next;
 		output = 0;
@@ -535,11 +571,11 @@ pidtable_add(struct proc *proc, int32_t *retval)
 		}
 	}
 	else{
-		/* The PID table is full*/
+		/* The PID table is full*/		
 		retval = NULL;
 		output = ENPROC;
 	}
-
+	
 	lock_release(pidtable->pid_lock);
 
 	return output;
@@ -692,19 +728,6 @@ sys__exit(int32_t waitcode)
 {
 	pidtable_exit(curproc, waitcode);
 	panic("Exit syscall should never get to this point.");
-}
-
-// make sure to free the trapframe in the heap.
-void
-enter_usermode(void *data1, unsigned long data2)
-{
-	(void) data2;
-	void *tf = (void *) curthread->t_stack + 16;
-
-	//TODO: FREE DATA1 I think?
-	memcpy(tf, (const void *) data1, sizeof(struct trapframe));
-	as_activate();
-	mips_usermode(tf);
 }
 
 

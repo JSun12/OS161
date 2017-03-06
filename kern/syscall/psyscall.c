@@ -43,7 +43,7 @@ enter_usermode(void *data1, unsigned long data2)
 }
 
 /*
- * Function which forks the current process to create a child.
+ Function which forks the current process to create a child.
  */
 int
 sys_fork(struct trapframe *tf, int32_t *retval0)
@@ -68,6 +68,7 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 	*retval0 = new_proc->pid;
 	ret = thread_fork("new_thread", new_proc, enter_usermode, new_tf, 1);
 	if (ret) {
+		pidtable_freepid((int) &new_proc->pid);
 		proc_destroy(new_proc);
 		kfree(new_tf);
 		return ret;
@@ -77,7 +78,7 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 }
 
 /*
- * Gets the PID of the current process.
+ Gets the PID of the current process.
  */
 int
 sys_getpid(int32_t *retval0)
@@ -90,9 +91,8 @@ sys_getpid(int32_t *retval0)
 	return 0;
 }
 
-
 /*
- * Function called by a parent process to wait until a child process exits.
+ Function called by a parent process to wait until a child process exits.
  */
 int
 sys_waitpid(pid_t pid, int32_t *retval0, int32_t options)
@@ -145,8 +145,8 @@ sys_waitpid(pid_t pid, int32_t *retval0, int32_t options)
 }
 
 /*
- * Exits the current process and stores the waitcode as defined in <kern/wait.h>.
- * The supplied waitcode to this funtion is assumed to be already encoded properly.
+ Exits the current process and stores the waitcode as defined in <kern/wait.h>.
+ The supplied waitcode to this funtion is assumed to be already encoded properly.
  */
 void
 sys__exit(int32_t waitcode)
@@ -159,11 +159,11 @@ sys__exit(int32_t waitcode)
 Checks to make sure the user string is less than max_len. If it is, then
 actual_length holds true length (not including null terminator).
 */
-static 
+static
 int
 strlen_check(const char *string, int max_len, size_t *actual_length)
 {
-	
+
 	int ret;
 	int i = -1;
 	char next_char;
@@ -185,7 +185,7 @@ strlen_check(const char *string, int max_len, size_t *actual_length)
 	return 0;
 }
 
-static 
+static
 int
 get_argc(char **args, int *argc)
 {
@@ -194,13 +194,13 @@ get_argc(char **args, int *argc)
 	char *next_arg;
 
 	do {
-		i++; 
+		i++;
 		ret = copyin((const_userptr_t) &args[i], (void *) &next_arg, (size_t) sizeof(char *));
 		if (ret) {
 			return ret;
 		}
 
-	} while (next_arg != NULL && i < ARG_MAX); 
+	} while (next_arg != NULL && i < ARG_MAX);
 
 	if (next_arg != NULL) {
 		return E2BIG;
@@ -210,7 +210,7 @@ get_argc(char **args, int *argc)
 	return 0;
 }
 
-static 
+static
 int
 string_in(const char *user_src, char **kern_dest, size_t copy_size)
 {
@@ -228,7 +228,7 @@ string_in(const char *user_src, char **kern_dest, size_t copy_size)
 	return 0;
 }
 
-static 
+static
 int
 string_out(const char *kernel_src, userptr_t user_dest, size_t copy_size)
 {
@@ -248,7 +248,7 @@ string_out(const char *kernel_src, userptr_t user_dest, size_t copy_size)
 Copies the user strings into ther kernel, populating size[] with their respective lengths.
 Returns an error if bytes surpasses ARG_MAX.
 */
-static 
+static
 int
 copy_in_args(int argc, char **args, char **args_in, int *size)
 {
@@ -350,7 +350,7 @@ sys_execv(const char *prog, char **args)
 		as_new = proc_setas(NULL);
 		as_deactivate();
 
-		proc_setas(as_old);		
+		proc_setas(as_old);
 		as_activate();
 
 		as_destroy(as_new);

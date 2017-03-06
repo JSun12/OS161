@@ -196,7 +196,6 @@ proc_destroy(struct proc *proc)
 
 	ft_destroy(proc->proc_ft);
 
-
 	int threadarray_size = threadarray_num(&proc->p_threads);
 	for (int i = 0; i < threadarray_size; i++){
 		threadarray_remove(&proc->p_threads, 0);
@@ -418,21 +417,36 @@ proc_setas(struct addrspace *newas)
 }
 
 /* Clears the pidtable for a given index */
-static 
+static
 void
 clear_pid(pid_t pid)
 {
+	KASSERT(pid >= PID_MIN && pid <= PID_MAX);
+
 	pidtable->pid_available++;
 	pidtable->pid_procs[pid] = NULL;
 	pidtable->pid_status[pid] = READY;
 	pidtable->pid_waitcode[pid] = (int) NULL;
 }
 
+/* Removes a given PID from the PID table. Used for failed forks. */
+void
+pidtable_freepid(pid_t pid)
+{
+	KASSERT(pid >= PID_MIN && pid <= PID_MAX);
+
+	lock_acquire(pidtable->pid_lock);
+	clear_pid(pid);
+	lock_release(pidtable->pid_lock);
+}
+
 /* Adds a given process to the pidtable at the given index */
-static 
+static
 void
 add_pid(pid_t pid, struct proc *proc)
 {
+	KASSERT(proc != NULL);
+
 	pidtable->pid_procs[pid] = proc;
 	pidtable->pid_status[pid] = RUNNING;
 	pidtable->pid_waitcode[pid] = (int) NULL;
@@ -440,11 +454,12 @@ add_pid(pid_t pid, struct proc *proc)
 }
 
 /* Will update the status of children to either ORPHAN or ZOMBIE. */
-static 
+static
 void
 pidtable_update_children(struct proc *proc)
 {
 	KASSERT(lock_do_i_hold(pidtable->pid_lock));
+	KASSERT(proc != NULL);
 
 	int num_child = array_num(proc->children);
 
@@ -513,6 +528,8 @@ pidtable_add(struct proc *proc, int32_t *retval)
 	int next;
 	int output = 0;
 
+	KASSERT(proc != NULL);
+
 	lock_acquire(pidtable->pid_lock);
 
 	if (pidtable->pid_available < 1){
@@ -552,6 +569,8 @@ pidtable_add(struct proc *proc, int32_t *retval)
 void
 pidtable_exit(struct proc *proc, int32_t waitcode)
 {
+	KASSERT(proc != NULL);
+
 	lock_acquire(pidtable->pid_lock);
 
 	pidtable_update_children(proc);

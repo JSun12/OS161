@@ -74,7 +74,6 @@ struct pidtable *pidtable;
 static void
 clear_pid(pid_t pid)
 {
-	KASSERT(lock_do_i_hold(pidtable->pid_lock));
 	pidtable->pid_available++;
 	pidtable->pid_procs[pid] = NULL;
 	pidtable->pid_status[pid] = READY;
@@ -85,10 +84,9 @@ clear_pid(pid_t pid)
 static void
 add_pid(pid_t pid, struct proc *proc)
 {
-	KASSERT(lock_do_i_hold(pidtable->pid_lock));
-	pidtable->pid_procs[next] = proc;
-	pidtable->pid_status[next] = RUNNING;
-	pidtable->pid_waitcode[next] = (int) NULL;
+	pidtable->pid_procs[pid] = proc;
+	pidtable->pid_status[pid] = RUNNING;
+	pidtable->pid_waitcode[pid] = (int) NULL;
 	pidtable->pid_available--;
 }
 

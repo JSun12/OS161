@@ -89,7 +89,6 @@ struct pidtable {
 void pidtable_bootstrap(void);
 int pidtable_add(struct proc *, int32_t *);
 void pidtable_exit(struct proc *, int32_t);
-void pidtable_update_children(struct proc *proc);
 
 /* This is the process structure for the kernel and for kernel-only threads. */
 extern struct proc *kproc;

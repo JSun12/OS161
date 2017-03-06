@@ -40,7 +40,6 @@
 #include <fsyscall.h>
 #include <syscall.h>
 
-
 /*
  * System call dispatcher.
  *
@@ -167,6 +166,7 @@ syscall(struct trapframe *tf)
 		break;
 
 		case SYS__exit:
+		/* Cannot identify encoding. */
 		sys__exit((int)tf->tf_a0);
 		panic("The exit syscall should never return");
 		break;

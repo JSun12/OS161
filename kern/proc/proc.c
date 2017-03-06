@@ -59,7 +59,7 @@
 #include <vfs.h>
 #include <syscall.h>
 #include <test.h>
-
+#include <kern/wait.h>
 #include <copyinout.h>
 
 /*
@@ -399,12 +399,12 @@ int
 sys_fork(struct trapframe *tf, int32_t *retval0)
 {
 	struct proc *new_proc;
-	int ret;	
+	int ret;
 
-	ret = proc_create_fork("new_proc", &new_proc); 
+	ret = proc_create_fork("new_proc", &new_proc);
 	if(ret) {
 		return ret;
-	}		
+	}
 
 	ret = pidtable_add(new_proc, &new_proc->pid);
 	if (ret){
@@ -435,7 +435,7 @@ proc_create_fork(const char *name, struct proc **new_proc)
 	if (*new_proc == NULL) {
 		return ENOMEM;
 	}
- 
+
 	ret = as_copy(curproc->p_addrspace, &(*new_proc)->p_addrspace);
 	if (ret) {
 		proc_destroy(*new_proc);
@@ -463,7 +463,7 @@ setup_forked_trapframe(struct trapframe *old_tf, struct trapframe **new_tf)
 	*new_tf = kmalloc(sizeof(struct trapframe));
 	if (*new_tf == NULL) {
 		return ENOMEM;
-	}	
+	}
 
 	memcpy((void *) *new_tf, (const void *) old_tf, sizeof(struct trapframe));
 	(*new_tf)->tf_v0 = 0;
@@ -482,7 +482,7 @@ enter_usermode(void *data1, unsigned long data2)
 
 	memcpy(tf, (const void *) data1, sizeof(struct trapframe));
 	kfree((struct trapframe *) data1);
-	
+
 	as_activate();
 	mips_usermode(tf);
 }
@@ -493,8 +493,9 @@ enter_usermode(void *data1, unsigned long data2)
 
 
 
-
-
+/*
+ * Initializes the PID table upon starting the kernel.
+ */
 void
 pidtable_bootstrap()
 {
@@ -535,7 +536,7 @@ pidtable_bootstrap()
  */
 int
 pidtable_add(struct proc *proc, int32_t *retval)
-{	
+{
 	int output;
 	int next;
 
@@ -544,7 +545,7 @@ pidtable_add(struct proc *proc, int32_t *retval)
 	// Add the given process to the parent
 	array_add(curproc->children, proc, NULL);
 
-	if(pidtable->pid_available > 0){		
+	if(pidtable->pid_available > 0){
 		next = pidtable->pid_next;
 		*retval = next;
 		output = 0;
@@ -573,11 +574,11 @@ pidtable_add(struct proc *proc, int32_t *retval)
 		}
 	}
 	else{
-		/* The PID table is full*/		
+		/* The PID table is full*/
 		retval = NULL;
 		output = ENPROC;
 	}
-	
+
 	lock_release(pidtable->pid_lock);
 
 	return output;
@@ -657,6 +658,9 @@ pidtable_update_children(struct proc *proc)
 	}
 }
 
+/*
+ * Gets the PID of the current process.
+ */
 int
 sys_getpid(int32_t *retval0)
 {
@@ -668,6 +672,10 @@ sys_getpid(int32_t *retval0)
 	return 0;
 }
 
+
+/*
+ * Function called by a parent process to wait until a child process exits.
+ */
 int
 sys_waitpid(pid_t pid, int32_t *retval0, int32_t options)
 {
@@ -703,12 +711,10 @@ sys_waitpid(pid_t pid, int32_t *retval0, int32_t options)
 	lock_acquire(pidtable->pid_lock);
 
 	status = pidtable->pid_status[pid];
-
 	while(status != ZOMBIE){
 		cv_wait(pidtable->pid_cv, pidtable->pid_lock);
 		status = pidtable->pid_status[pid];
 	}
-	/* Obtain the waitcode before leaving the lock */
 	waitcode = pidtable->pid_waitcode[pid];
 
 	lock_release(pidtable->pid_lock);
@@ -726,8 +732,29 @@ sys_waitpid(pid_t pid, int32_t *retval0, int32_t options)
 }
 
 void
-sys__exit(int32_t waitcode)
+sys__exit(int32_t exit_status)
 {
+	/* Use definitions from <kern/wait.h> to encode the waitcode status  */
+	int waitcode;
+
+	exit_status = _WWHAT(exit_status);
+	switch (exit_status) {
+		case __WEXITED:
+		waitcode = _MKWAIT_EXIT(exit_status);
+		break;
+		case __WSIGNALED:
+		waitcode = _MKWAIT_SIG(exit_status);
+		break;
+		case __WCORED:
+		waitcode = _MKWAIT_CORE(exit_status);
+		break;
+		case __WSTOPPED:
+		waitcode = _MKWAIT_STOP(exit_status);
+		break;
+		default:
+		/* Default to maintaining original status */
+		waitcode = exit_status;
+	}
 	pidtable_exit(curproc, waitcode);
 	panic("Exit syscall should never get to this point.");
 }
@@ -745,8 +772,8 @@ sys__exit(int32_t waitcode)
 int
 sys_execv(const char *prog, char **args)
 {
-	int ret;	
-	
+	int ret;
+
 	if (prog == NULL || args == NULL) {
 		return EFAULT;
 	}
@@ -807,11 +834,11 @@ sys_execv(const char *prog, char **args)
 	ret = as_define_stack(as, &stackptr);
 	if (ret) {
 		return ret;
-	}	
+	}
 
 	userptr_t args_out_addr;
 	copy_out_args(argc, args_in, size, &stackptr, &args_out_addr);
-	
+
 	enter_new_process(argc, args_out_addr, NULL, stackptr, entrypoint);
 
 	/* enter_new_process does not return. */
@@ -821,26 +848,26 @@ sys_execv(const char *prog, char **args)
 
 /*
 Checks to make sure the user string is less than max_len. If it is, then
-actual_length holds true length (not including null terminator). 
+actual_length holds true length (not including null terminator).
 */
-int 
+int
 strlen_check(const char *string, int max_len, size_t *actual_length)
-{	
-	int i = 0; 
+{
+	int i = 0;
 	while (string[i] != 0 && i < max_len) i++;
 
 	if (string[i] != 0) {
-		return E2BIG; 
+		return E2BIG;
 	}
-	
-	*actual_length = i; 
-	return 0; 
+
+	*actual_length = i;
+	return 0;
 }
 
 int
 get_argc(char **args, int *argc)
 {
-	int i = 0; 
+	int i = 0;
 	while(args[i] != NULL && i < ARG_MAX) i++;
 
 	if (args[i] != NULL) {
@@ -861,7 +888,7 @@ string_in(const char *user_src, char **kern_dest, size_t copy_size)
 	kfree(path_len);
 }
 
-void 
+void
 string_out(const char *kernel_src, userptr_t user_dest, size_t copy_size)
 {
 	size_t *path_len = kmalloc(sizeof(int));
@@ -870,14 +897,14 @@ string_out(const char *kernel_src, userptr_t user_dest, size_t copy_size)
 }
 
 /*
-Copies the user strings into ther kernel, populating size[] with their respective lengths. 
+Copies the user strings into ther kernel, populating size[] with their respective lengths.
 Returns an error if bytes surpasses ARG_MAX.
 */
 int
 copy_in_args(int argc, char **args, char **args_in, int *size)
 {
 	int arg_size_left = ARG_MAX;
-	size_t cur_size;	
+	size_t cur_size;
 	int ret;
 
 	for (int i = 0; i < argc; i++) {
@@ -903,7 +930,7 @@ copy_out_args(int argc, char **args, int *size, vaddr_t *stackptr, userptr_t *ar
 	userptr_t arg_addr = (userptr_t) (*stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
 	userptr_t *args_out = (userptr_t *) (*stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
 	for (int i = 0; i < argc; i++) {
-		arg_addr -= size[i]; 
+		arg_addr -= size[i];
 		*args_out = arg_addr;
 		string_out((const char *) args[i], arg_addr, (size_t) size[i]);
 		args_out++;

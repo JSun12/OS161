@@ -14,12 +14,4 @@ int proc_create_fork(const char *, struct proc **);
 int setup_forked_trapframe(struct trapframe *, struct trapframe **);
 void enter_usermode(void *, unsigned long);
 
-
-int strlen_check(const char *, int, size_t*);
-int get_argc(char **, int *);
-int string_in(const char *, char **, size_t);
-int copy_in_args(int, char **, char **, int *);
-void copy_out_args(int, char **, int *, vaddr_t *, userptr_t *);
-int string_out(const char *, userptr_t, size_t);
-
 #endif /* _PSYSCALL_H_ */

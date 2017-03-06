@@ -20,6 +20,121 @@
 #include <proc.h>
 #include <psyscall.h>
 
+
+
+/*
+Checks to make sure the user string is less than max_len. If it is, then
+actual_length holds true length (not including null terminator).
+*/
+static int
+strlen_check(const char *string, int max_len, size_t *actual_length)
+{
+	int i = 0;
+	while (string[i] != 0 && i < max_len) i++;
+
+	if (string[i] != 0) {
+		return E2BIG;
+	}
+
+	*actual_length = i;
+	return 0;
+}
+
+static int
+get_argc(char **args, int *argc)
+{
+	int i = 0;
+	while(args[i] != NULL && i < ARG_MAX) i++;
+
+	if (args[i] != NULL) {
+		return E2BIG;
+	}
+
+	*argc = i;
+	return 0;
+}
+
+static int
+string_in(const char *user_src, char **kern_dest, size_t copy_size)
+{
+	int ret;
+
+	copy_size++;
+	*kern_dest = kmalloc(copy_size*sizeof(char));
+    size_t *path_len = kmalloc(sizeof(int));
+	ret = copyinstr((const_userptr_t) user_src, *kern_dest, copy_size, path_len);
+	if (ret) {
+		return ret;
+	}
+
+	kfree(path_len);
+	return 0;
+}
+
+static int
+string_out(const char *kernel_src, userptr_t user_dest, size_t copy_size)
+{
+	int ret;
+
+	size_t *path_len = kmalloc(sizeof(int));
+	ret = copyoutstr(kernel_src, user_dest, copy_size, path_len);
+	if (ret) {
+		return ret;
+	}
+
+	kfree(path_len);
+	return 0;
+}
+
+/*
+Copies the user strings into ther kernel, populating size[] with their respective lengths.
+Returns an error if bytes surpasses ARG_MAX.
+*/
+static int
+copy_in_args(int argc, char **args, char **args_in, int *size)
+{
+	int arg_size_left = ARG_MAX;
+	size_t cur_size;
+	int ret;
+
+	for (int i = 0; i < argc; i++) {
+		ret = strlen_check((const char *) args[i], arg_size_left - 1, &cur_size);
+		if (ret) {
+			return ret;
+		}
+
+		arg_size_left -= (cur_size + 1);
+		size[i] = (int) cur_size + 1;
+		string_in((const char *) args[i], &args_in[i], cur_size);
+	}
+
+	return 0;
+}
+
+/*
+Copies the kernel strings out to the user stack, and cleans up the kernel strings.
+*/
+static
+void
+copy_out_args(int argc, char **args, int *size, vaddr_t *stackptr, userptr_t *args_out_addr)
+{
+	userptr_t arg_addr = (userptr_t) (*stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
+	userptr_t *args_out = (userptr_t *) (*stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
+	for (int i = 0; i < argc; i++) {
+		arg_addr -= size[i];
+		*args_out = arg_addr;
+		string_out((const char *) args[i], arg_addr, (size_t) size[i]);
+		args_out++;
+		kfree(args[i]);
+	}
+
+	*args_out = NULL;
+	*args_out_addr = (userptr_t) (*stackptr - argc*sizeof(int) - sizeof(NULL));
+	arg_addr -= (int) arg_addr % sizeof(void *);
+	*stackptr = (vaddr_t) arg_addr;
+}
+
+
 /*
  * Gets the PID of the current process.
  */
@@ -99,14 +214,9 @@ sys__exit(int32_t waitcode)
 	panic("Exit syscall should never get to this point.");
 }
 
-
-
-
-
 /*
 Make crashed programs go back to kernel menu.
 */
-
 int
 sys_execv(const char *prog, char **args)
 {
@@ -181,119 +291,10 @@ sys_execv(const char *prog, char **args)
 	return EINVAL;
 }
 
-/*
-Checks to make sure the user string is less than max_len. If it is, then
-actual_length holds true length (not including null terminator).
-*/
-int
-strlen_check(const char *string, int max_len, size_t *actual_length)
-{
-	int i = 0;
-	while (string[i] != 0 && i < max_len) i++;
-
-	if (string[i] != 0) {
-		return E2BIG;
-	}
-
-	*actual_length = i;
-	return 0;
-}
-
-int
-get_argc(char **args, int *argc)
-{
-	int i = 0;
-	while(args[i] != NULL && i < ARG_MAX) i++;
-
-	if (args[i] != NULL) {
-		return E2BIG;
-	}
-
-	*argc = i;
-	return 0;
-}
-
-int
-string_in(const char *user_src, char **kern_dest, size_t copy_size)
-{
-	int ret;
-
-	copy_size++;
-	*kern_dest = kmalloc(copy_size*sizeof(char));
-    size_t *path_len = kmalloc(sizeof(int));
-	ret = copyinstr((const_userptr_t) user_src, *kern_dest, copy_size, path_len);
-	if (ret) {
-		return ret;
-	}
-
-	kfree(path_len);
-	return 0;
-}
-
-int
-string_out(const char *kernel_src, userptr_t user_dest, size_t copy_size)
-{
-	int ret;
-
-	size_t *path_len = kmalloc(sizeof(int));
-	ret = copyoutstr(kernel_src, user_dest, copy_size, path_len);
-	if (ret) {
-		return ret;
-	}
-
-	kfree(path_len);
-	return 0;
-}
 
 /*
-Copies the user strings into ther kernel, populating size[] with their respective lengths.
-Returns an error if bytes surpasses ARG_MAX.
-*/
-int
-copy_in_args(int argc, char **args, char **args_in, int *size)
-{
-	int arg_size_left = ARG_MAX;
-	size_t cur_size;
-	int ret;
-
-	for (int i = 0; i < argc; i++) {
-		ret = strlen_check((const char *) args[i], arg_size_left - 1, &cur_size);
-		if (ret) {
-			return ret;
-		}
-
-		arg_size_left -= (cur_size + 1);
-		size[i] = (int) cur_size + 1;
-		string_in((const char *) args[i], &args_in[i], cur_size);
-	}
-
-	return 0;
-}
-
-/*
-Copies the kernel strings out to the user stack, and cleans up the kernel strings.
-*/
-void
-copy_out_args(int argc, char **args, int *size, vaddr_t *stackptr, userptr_t *args_out_addr)
-{
-	userptr_t arg_addr = (userptr_t) (*stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
-	userptr_t *args_out = (userptr_t *) (*stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
-	for (int i = 0; i < argc; i++) {
-		arg_addr -= size[i];
-		*args_out = arg_addr;
-		string_out((const char *) args[i], arg_addr, (size_t) size[i]);
-		args_out++;
-		kfree(args[i]);
-	}
-
-	*args_out = NULL;
-	*args_out_addr = (userptr_t) (*stackptr - argc*sizeof(int) - sizeof(NULL));
-	arg_addr -= (int) arg_addr % sizeof(void *);
-	*stackptr = (vaddr_t) arg_addr;
-}
-
-
-
+ * Function which forks the current process to create a child.
+ */
 int
 sys_fork(struct trapframe *tf, int32_t *retval0)
 {

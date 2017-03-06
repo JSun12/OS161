@@ -6,3 +6,4 @@ kern/compile/*
 userland/cscope.*
 **/build
 kern/vm/.copyinout.c.swp
+*.swp

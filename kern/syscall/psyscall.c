@@ -185,6 +185,9 @@ strlen_check(const char *string, int max_len, size_t *actual_length)
 	return 0;
 }
 
+/*
+Return error if there are more arguments than ARG_MAX
+*/
 static 
 int
 get_argc(char **args, int *argc)
@@ -221,6 +224,8 @@ string_in(const char *user_src, char **kern_dest, size_t copy_size)
     size_t *path_len = kmalloc(sizeof(int));
 	ret = copyinstr((const_userptr_t) user_src, *kern_dest, copy_size, path_len);
 	if (ret) {
+		kfree(*kern_dest);
+		kfree(path_len);
 		return ret;
 	}
 
@@ -237,6 +242,7 @@ string_out(const char *kernel_src, userptr_t user_dest, size_t copy_size)
 	size_t *path_len = kmalloc(sizeof(int));
 	ret = copyoutstr(kernel_src, user_dest, copy_size, path_len);
 	if (ret) {
+		kfree(path_len);
 		return ret;
 	}
 
@@ -259,6 +265,9 @@ copy_in_args(int argc, char **args, char **args_in, int *size)
 	for (int i = 0; i < argc; i++) {
 		ret = strlen_check((const char *) args[i], arg_size_left - 1, &cur_size);
 		if (ret) {
+			for (int j = 0; j < i; j++) {
+				kfree(args_in[j]);
+			}
 			return ret;
 		}
 
@@ -271,7 +280,7 @@ copy_in_args(int argc, char **args, char **args_in, int *size)
 }
 
 /*
-Copies the kernel strings out to the user stack, and cleans up the kernel strings.
+Copies the kernel strings out to the user stack.
 */
 static
 void
@@ -284,7 +293,6 @@ copy_out_args(int argc, char **args, int *size, vaddr_t *stackptr, userptr_t *ar
 		*args_out = arg_addr;
 		string_out((const char *) args[i], arg_addr, (size_t) size[i]);
 		args_out++;
-		kfree(args[i]);
 	}
 
 	*args_out = NULL;
@@ -293,8 +301,31 @@ copy_out_args(int argc, char **args, int *size, vaddr_t *stackptr, userptr_t *ar
 	*stackptr = (vaddr_t) arg_addr;
 }
 
+static
+void
+switch_addrspace(struct addrspace *as_old) 
+{
+	proc_setas(NULL);
+	as_deactivate();
+
+	proc_setas(as_old);		
+	as_activate();
+}
+
+static
+void
+free_copied_in_args(int argc, int *size, char **args_in)
+{
+	for (int i = 0; i < argc; i++) {
+		kfree(args_in[i]);
+	}
+	
+	kfree(size);
+	kfree(args_in);
+}
+
 /*
-Make crashed programs go back to kernel menu.
+Loads a new program in a new address space. Make crashed programs go back to kernel menu.
 */
 int
 sys_execv(const char *prog, char **args)
@@ -321,6 +352,7 @@ sys_execv(const char *prog, char **args)
 	int *size = kmalloc(argc*sizeof(int));
 	ret = copy_in_args(argc, args, args_in, size);
 	if (ret) {
+		kfree(progname);
 		return ret;
 	}
 
@@ -329,45 +361,50 @@ sys_execv(const char *prog, char **args)
 
 	ret = vfs_open(progname, O_RDONLY, 0, &v);
 	if (ret) {
+		kfree(progname);
+		free_copied_in_args(argc, size, args_in);
 		return ret;
 	}
 
-	struct addrspace *as_old = proc_setas(NULL);
-	as_deactivate();
-
-	KASSERT(proc_getas() == NULL);
-
+	struct addrspace *as_old = proc_getas();
 	struct addrspace *as_new = as_create();
 	if (as_new == NULL) {
+		vfs_close(v);
+		kfree(progname);
+		free_copied_in_args(argc, size, args_in);
 		return ENOMEM;
 	}
 
-	proc_setas(as_new);
-	as_activate();
+	switch_addrspace(as_new);
 
 	ret = load_elf(v, &entrypoint);
 	if (ret) {
-		as_new = proc_setas(NULL);
-		as_deactivate();
-
-		proc_setas(as_old);		
-		as_activate();
-
+		switch_addrspace(as_old);
 		as_destroy(as_new);
 		vfs_close(v);
+		kfree(progname);
+		free_copied_in_args(argc, size, args_in);
+		return ret;
+	}
+
+	ret = as_define_stack(as_new, &stackptr);
+	if (ret) {
+		switch_addrspace(as_old);
+		as_destroy(as_new);
+		vfs_close(v);
+		kfree(progname);
+		free_copied_in_args(argc, size, args_in);
 		return ret;
 	}
 
 	as_destroy(as_old);
 	vfs_close(v);
 
-	ret = as_define_stack(as_new, &stackptr);
-	if (ret) {
-		return ret;
-	}
-
 	userptr_t args_out_addr;
 	copy_out_args(argc, args_in, size, &stackptr, &args_out_addr);
+
+	kfree(progname);
+	free_copied_in_args(argc, size, args_in);
 
 	enter_new_process(argc, args_out_addr, NULL, stackptr, entrypoint);
 

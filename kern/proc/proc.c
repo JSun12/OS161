@@ -719,9 +719,8 @@ sys_waitpid(pid_t pid, int32_t *retval0, int32_t options)
 
 	lock_release(pidtable->pid_lock);
 
-	/* It is allowed for the return value to point to NULL. If this is the case, avoid setting it. */
+	/* A NULL retval0 indicates that nothing is to be returned. */
 	if(retval0 != NULL){
-		/* Safely copy the kernel's waitcode to the user space */
 		int ret = copyout(&waitcode, (userptr_t) retval0, sizeof(int32_t));
 		if (ret){
 			return ret;
@@ -731,11 +730,15 @@ sys_waitpid(pid_t pid, int32_t *retval0, int32_t options)
 	return 0;
 }
 
+/*
+ * Exits the current process and stores the waitcode as defined in <kern/wait.h>.
+ * The supplied waitcode to this funtion is assumed to be already encoded properly.
+ */
 void
-sys__exit(int32_t exit_status)
+sys__exit(int32_t waitcode)
 {
 	/* Use definitions from <kern/wait.h> to encode the waitcode status  */
-	int waitcode;
+	/*int waitcode;
 	int switchcode;
 
 	switchcode = _WWHAT(exit_status);
@@ -753,11 +756,10 @@ sys__exit(int32_t exit_status)
 		waitcode = _MKWAIT_STOP(exit_status);
 		break;
 		default:
-		/* Default to maintaining original status */
 		waitcode = exit_status;
 	}
-	(void) waitcode;
-	pidtable_exit(curproc, _MKWVAL(exit_status));
+	(void) waitcode;*/
+	pidtable_exit(curproc, waitcode);
 	panic("Exit syscall should never get to this point.");
 }
 

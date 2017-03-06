@@ -39,6 +39,7 @@
 #include <copyinout.h>
 #include <fsyscall.h>
 #include <syscall.h>
+#include <kern/wait.h>
 
 /*
  * System call dispatcher.
@@ -165,9 +166,9 @@ syscall(struct trapframe *tf)
 		err = sys_waitpid((pid_t)tf->tf_a0, (int32_t *) tf->tf_a1, (int32_t) tf->tf_a2);
 		break;
 
-		case SYS__exit:
-		/* Cannot identify encoding. */
-		sys__exit((int)tf->tf_a0);
+		case SYS__exit: ;
+		int waitcode = (int) _MKWAIT_EXIT(tf->tf_a0);
+		sys__exit(waitcode);
 		panic("The exit syscall should never return");
 		break;
 

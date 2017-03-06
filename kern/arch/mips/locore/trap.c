@@ -40,6 +40,7 @@
 #include <mainbus.h>
 #include <syscall.h>
 #include <proc.h>
+#include <kern/wait.h>
 
 /* in exception-*.S */
 extern __DEAD void asm_usermode(struct trapframe *tf);
@@ -112,8 +113,8 @@ kill_curthread(vaddr_t epc, unsigned code, vaddr_t vaddr)
 		break;
 	}
 
-	/* Ask the kernel to remove this process */
-	sys__exit(sig);
+	/* Ask the kernel to remove this process and signal an error has occured. */
+	sys__exit(_MKWAIT_SIG(sig));
 
 	panic("A process escaped kill_curthread.\n");
 }

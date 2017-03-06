@@ -53,15 +53,6 @@
 #include <machine/trapframe.h>
 #include <cpu.h>
 
-#include <kern/fcntl.h>
-#include <lib.h>
-#include <vm.h>
-#include <vfs.h>
-#include <syscall.h>
-#include <test.h>
-#include <kern/wait.h>
-#include <copyinout.h>
-
 /*
  * The process for the kernel; this holds all the kernel-only threads.
  */

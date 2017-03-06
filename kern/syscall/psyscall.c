@@ -1,23 +1,13 @@
 #include <types.h>
-#include <spl.h>
 #include <proc.h>
 #include <current.h>
 #include <addrspace.h>
-#include <filetable.h>
-#include <limits.h>
 #include <kern/errno.h>
 #include <machine/trapframe.h>
-#include <cpu.h>
-
 #include <kern/fcntl.h>
-#include <lib.h>
-#include <vm.h>
 #include <vfs.h>
 #include <syscall.h>
-#include <test.h>
-#include <kern/wait.h>
 #include <copyinout.h>
-#include <proc.h>
 #include <psyscall.h>
 
 
@@ -173,10 +163,21 @@ static
 int
 strlen_check(const char *string, int max_len, size_t *actual_length)
 {
-	int i = 0;
-	while (string[i] != 0 && i < max_len) i++;
+	
+	int ret;
+	int i = -1;
+	char next_char;
 
-	if (string[i] != 0) {
+	do {
+		i++;
+		ret = copyin((const_userptr_t) &string[i], (void *) &next_char, (size_t) sizeof(char));
+		if (ret) {
+			return ret;
+		}
+
+	} while (next_char != 0 && i < max_len);
+
+	if (next_char != 0) {
 		return E2BIG;
 	}
 
@@ -188,10 +189,20 @@ static
 int
 get_argc(char **args, int *argc)
 {
+	int ret;
 	int i = 0;
-	while(args[i] != NULL && i < ARG_MAX) i++;
+	char *next_arg;
 
-	if (args[i] != NULL) {
+	do {
+		i++; 
+		ret = copyin((const_userptr_t) &args[i], (void *) &next_arg, (size_t) sizeof(char *));
+		if (ret) {
+			return ret;
+		}
+
+	} while (next_arg != NULL && i < ARG_MAX); 
+
+	if (next_arg != NULL) {
 		return E2BIG;
 	}
 
@@ -321,30 +332,36 @@ sys_execv(const char *prog, char **args)
 		return ret;
 	}
 
-	struct addrspace *as;
-	as = proc_setas(NULL);
+	struct addrspace *as_old = proc_setas(NULL);
 	as_deactivate();
-	as_destroy(as);
 
 	KASSERT(proc_getas() == NULL);
 
-	as = as_create();
-	if (as == NULL) {
+	struct addrspace *as_new = as_create();
+	if (as_new == NULL) {
 		return ENOMEM;
 	}
 
-	proc_setas(as);
+	proc_setas(as_new);
 	as_activate();
 
 	ret = load_elf(v, &entrypoint);
 	if (ret) {
+		as_new = proc_setas(NULL);
+		as_deactivate();
+
+		proc_setas(as_old);		
+		as_activate();
+
+		as_destroy(as_new);
 		vfs_close(v);
 		return ret;
 	}
 
+	as_destroy(as_old);
 	vfs_close(v);
 
-	ret = as_define_stack(as, &stackptr);
+	ret = as_define_stack(as_new, &stackptr);
 	if (ret) {
 		return ret;
 	}

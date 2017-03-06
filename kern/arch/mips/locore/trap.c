@@ -40,6 +40,7 @@
 #include <mainbus.h>
 #include <syscall.h>
 #include <proc.h>
+#include <psyscall.h>
 #include <kern/wait.h>
 
 /* in exception-*.S */

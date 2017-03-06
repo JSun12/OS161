@@ -102,6 +102,9 @@ struct proc *proc_create(const char *name);
 /* Create a fresh process for use by runprogram(). */
 struct proc *proc_create_runprogram(const char *name);
 
+/* Copies the current process to a new process structure */
+int proc_create_fork(const char *, struct proc **);
+
 /* Destroy a process. */
 void proc_destroy(struct proc *proc);
 

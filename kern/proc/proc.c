@@ -70,56 +70,6 @@ struct proc *kproc;
 /* Global PID table */
 struct pidtable *pidtable;
 
-/* Clears the pidtable for a given index */
-static void
-clear_pid(pid_t pid)
-{
-	pidtable->pid_available++;
-	pidtable->pid_procs[pid] = NULL;
-	pidtable->pid_status[pid] = READY;
-	pidtable->pid_waitcode[pid] = (int) NULL;
-}
-
-/* Adds a given process to the pidtable at the given index */
-static void
-add_pid(pid_t pid, struct proc *proc)
-{
-	pidtable->pid_procs[pid] = proc;
-	pidtable->pid_status[pid] = RUNNING;
-	pidtable->pid_waitcode[pid] = (int) NULL;
-	pidtable->pid_available--;
-}
-
-/* Will update the status of children to either ORPHAN or ZOMBIE. */
-static void
-pidtable_update_children(struct proc *proc)
-{
-	KASSERT(lock_do_i_hold(pidtable->pid_lock));
-
-	int num_child = array_num(proc->children);
-
-	for(int i = num_child-1; i >= 0; i--){
-
-		struct proc *child = array_get(proc->children, i);
-		int child_pid = child->pid;
-
-		if(pidtable->pid_status[child_pid] == RUNNING){
-			pidtable->pid_status[child_pid] = ORPHAN;
-		}
-		else if (pidtable->pid_status[child_pid] == ZOMBIE){
-			/* Update the next pid indicator */
-			if(child_pid < pidtable->pid_next){
-				pidtable->pid_next = child_pid;
-			}
-			clear_pid(child_pid);
-			proc_destroy(child);
-		}
-		else{
-			panic("Tried to modify a child that did not exist.\n");
-		}
-	}
-}
-
 /*
  * Create a proc structure.
  */
@@ -332,6 +282,41 @@ proc_create_runprogram(const char *name)
 	return newproc;
 }
 
+
+/*
+ * Sets up the memory structures for a newly forked process.
+ */
+int
+proc_create_fork(const char *name, struct proc **new_proc)
+{
+	int ret;
+
+	*new_proc = proc_create(name);
+	if (*new_proc == NULL) {
+		return ENOMEM;
+	}
+
+	ret = as_copy(curproc->p_addrspace, &(*new_proc)->p_addrspace);
+	if (ret) {
+		proc_destroy(*new_proc);
+		return ret;
+	}
+
+	spinlock_acquire(&curproc->p_lock);
+	if (curproc->p_cwd != NULL) {
+		VOP_INCREF(curproc->p_cwd);
+		(*new_proc)->p_cwd = curproc->p_cwd;
+	}
+	spinlock_release(&curproc->p_lock);
+
+	struct ft *ft = curproc->proc_ft;
+	lock_acquire(ft->ft_lock);
+	ft_copy(ft, (*new_proc)->proc_ft);
+	lock_release(ft->ft_lock);
+
+	return 0;
+}
+
 /*
  * Add a thread to a process. Either the thread or the process might
  * or might not be current.
@@ -439,6 +424,59 @@ proc_setas(struct addrspace *newas)
 	proc->p_addrspace = newas;
 	spinlock_release(&proc->p_lock);
 	return oldas;
+}
+
+/* Clears the pidtable for a given index */
+static 
+void
+clear_pid(pid_t pid)
+{
+	pidtable->pid_available++;
+	pidtable->pid_procs[pid] = NULL;
+	pidtable->pid_status[pid] = READY;
+	pidtable->pid_waitcode[pid] = (int) NULL;
+}
+
+/* Adds a given process to the pidtable at the given index */
+static 
+void
+add_pid(pid_t pid, struct proc *proc)
+{
+	pidtable->pid_procs[pid] = proc;
+	pidtable->pid_status[pid] = RUNNING;
+	pidtable->pid_waitcode[pid] = (int) NULL;
+	pidtable->pid_available--;
+}
+
+/* Will update the status of children to either ORPHAN or ZOMBIE. */
+static 
+void
+pidtable_update_children(struct proc *proc)
+{
+	KASSERT(lock_do_i_hold(pidtable->pid_lock));
+
+	int num_child = array_num(proc->children);
+
+	for(int i = num_child-1; i >= 0; i--){
+
+		struct proc *child = array_get(proc->children, i);
+		int child_pid = child->pid;
+
+		if(pidtable->pid_status[child_pid] == RUNNING){
+			pidtable->pid_status[child_pid] = ORPHAN;
+		}
+		else if (pidtable->pid_status[child_pid] == ZOMBIE){
+			/* Update the next pid indicator */
+			if(child_pid < pidtable->pid_next){
+				pidtable->pid_next = child_pid;
+			}
+			clear_pid(child_pid);
+			proc_destroy(child);
+		}
+		else{
+			panic("Tried to modify a child that did not exist.\n");
+		}
+	}
 }
 
 /*

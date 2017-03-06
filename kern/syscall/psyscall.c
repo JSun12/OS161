@@ -21,119 +21,70 @@
 #include <psyscall.h>
 
 
-
-/*
-Checks to make sure the user string is less than max_len. If it is, then
-actual_length holds true length (not including null terminator).
-*/
-static int
-strlen_check(const char *string, int max_len, size_t *actual_length)
-{
-	int i = 0;
-	while (string[i] != 0 && i < max_len) i++;
-
-	if (string[i] != 0) {
-		return E2BIG;
-	}
-
-	*actual_length = i;
-	return 0;
-}
-
-static int
-get_argc(char **args, int *argc)
-{
-	int i = 0;
-	while(args[i] != NULL && i < ARG_MAX) i++;
-
-	if (args[i] != NULL) {
-		return E2BIG;
-	}
-
-	*argc = i;
-	return 0;
-}
-
-static int
-string_in(const char *user_src, char **kern_dest, size_t copy_size)
-{
-	int ret;
-
-	copy_size++;
-	*kern_dest = kmalloc(copy_size*sizeof(char));
-    size_t *path_len = kmalloc(sizeof(int));
-	ret = copyinstr((const_userptr_t) user_src, *kern_dest, copy_size, path_len);
-	if (ret) {
-		return ret;
-	}
-
-	kfree(path_len);
-	return 0;
-}
-
-static int
-string_out(const char *kernel_src, userptr_t user_dest, size_t copy_size)
-{
-	int ret;
-
-	size_t *path_len = kmalloc(sizeof(int));
-	ret = copyoutstr(kernel_src, user_dest, copy_size, path_len);
-	if (ret) {
-		return ret;
-	}
-
-	kfree(path_len);
-	return 0;
-}
-
-/*
-Copies the user strings into ther kernel, populating size[] with their respective lengths.
-Returns an error if bytes surpasses ARG_MAX.
-*/
-static int
-copy_in_args(int argc, char **args, char **args_in, int *size)
-{
-	int arg_size_left = ARG_MAX;
-	size_t cur_size;
-	int ret;
-
-	for (int i = 0; i < argc; i++) {
-		ret = strlen_check((const char *) args[i], arg_size_left - 1, &cur_size);
-		if (ret) {
-			return ret;
-		}
-
-		arg_size_left -= (cur_size + 1);
-		size[i] = (int) cur_size + 1;
-		string_in((const char *) args[i], &args_in[i], cur_size);
-	}
-
-	return 0;
-}
-
-/*
-Copies the kernel strings out to the user stack, and cleans up the kernel strings.
-*/
 static
-void
-copy_out_args(int argc, char **args, int *size, vaddr_t *stackptr, userptr_t *args_out_addr)
+int
+setup_forked_trapframe(struct trapframe *old_tf, struct trapframe **new_tf)
 {
-	userptr_t arg_addr = (userptr_t) (*stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
-	userptr_t *args_out = (userptr_t *) (*stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
-	for (int i = 0; i < argc; i++) {
-		arg_addr -= size[i];
-		*args_out = arg_addr;
-		string_out((const char *) args[i], arg_addr, (size_t) size[i]);
-		args_out++;
-		kfree(args[i]);
+	*new_tf = kmalloc(sizeof(struct trapframe));
+	if (*new_tf == NULL) {
+		return ENOMEM;
 	}
 
-	*args_out = NULL;
-	*args_out_addr = (userptr_t) (*stackptr - argc*sizeof(int) - sizeof(NULL));
-	arg_addr -= (int) arg_addr % sizeof(void *);
-	*stackptr = (vaddr_t) arg_addr;
+	memcpy((void *) *new_tf, (const void *) old_tf, sizeof(struct trapframe));
+	(*new_tf)->tf_v0 = 0;
+	(*new_tf)->tf_v1 = 0;
+	(*new_tf)->tf_a3 = 0;      /* signal no error */
+	(*new_tf)->tf_epc += 4;
+
+	return 0;
 }
 
+void
+enter_usermode(void *data1, unsigned long data2)
+{
+	(void) data2;
+	void *tf = (void *) curthread->t_stack + 16;
+
+	memcpy(tf, (const void *) data1, sizeof(struct trapframe));
+	kfree((struct trapframe *) data1);
+
+	as_activate();
+	mips_usermode(tf);
+}
+
+/*
+ * Function which forks the current process to create a child.
+ */
+int
+sys_fork(struct trapframe *tf, int32_t *retval0)
+{
+	struct proc *new_proc;
+	int ret;
+
+	ret = proc_create_fork("new_proc", &new_proc);
+	if(ret) {
+		return ret;
+	}
+
+	ret = pidtable_add(new_proc, &new_proc->pid);
+	if (ret){
+		proc_destroy(new_proc);
+		return ret;
+	}
+
+	struct trapframe *new_tf;
+	setup_forked_trapframe(tf, &new_tf);
+
+	*retval0 = new_proc->pid;
+	ret = thread_fork("new_thread", new_proc, enter_usermode, new_tf, 1);
+	if (ret) {
+		proc_destroy(new_proc);
+		kfree(new_tf);
+		return ret;
+	}
+
+	return 0;
+}
 
 /*
  * Gets the PID of the current process.
@@ -215,6 +166,123 @@ sys__exit(int32_t waitcode)
 }
 
 /*
+Checks to make sure the user string is less than max_len. If it is, then
+actual_length holds true length (not including null terminator).
+*/
+static 
+int
+strlen_check(const char *string, int max_len, size_t *actual_length)
+{
+	int i = 0;
+	while (string[i] != 0 && i < max_len) i++;
+
+	if (string[i] != 0) {
+		return E2BIG;
+	}
+
+	*actual_length = i;
+	return 0;
+}
+
+static 
+int
+get_argc(char **args, int *argc)
+{
+	int i = 0;
+	while(args[i] != NULL && i < ARG_MAX) i++;
+
+	if (args[i] != NULL) {
+		return E2BIG;
+	}
+
+	*argc = i;
+	return 0;
+}
+
+static 
+int
+string_in(const char *user_src, char **kern_dest, size_t copy_size)
+{
+	int ret;
+
+	copy_size++;
+	*kern_dest = kmalloc(copy_size*sizeof(char));
+    size_t *path_len = kmalloc(sizeof(int));
+	ret = copyinstr((const_userptr_t) user_src, *kern_dest, copy_size, path_len);
+	if (ret) {
+		return ret;
+	}
+
+	kfree(path_len);
+	return 0;
+}
+
+static 
+int
+string_out(const char *kernel_src, userptr_t user_dest, size_t copy_size)
+{
+	int ret;
+
+	size_t *path_len = kmalloc(sizeof(int));
+	ret = copyoutstr(kernel_src, user_dest, copy_size, path_len);
+	if (ret) {
+		return ret;
+	}
+
+	kfree(path_len);
+	return 0;
+}
+
+/*
+Copies the user strings into ther kernel, populating size[] with their respective lengths.
+Returns an error if bytes surpasses ARG_MAX.
+*/
+static 
+int
+copy_in_args(int argc, char **args, char **args_in, int *size)
+{
+	int arg_size_left = ARG_MAX;
+	size_t cur_size;
+	int ret;
+
+	for (int i = 0; i < argc; i++) {
+		ret = strlen_check((const char *) args[i], arg_size_left - 1, &cur_size);
+		if (ret) {
+			return ret;
+		}
+
+		arg_size_left -= (cur_size + 1);
+		size[i] = (int) cur_size + 1;
+		string_in((const char *) args[i], &args_in[i], cur_size);
+	}
+
+	return 0;
+}
+
+/*
+Copies the kernel strings out to the user stack, and cleans up the kernel strings.
+*/
+static
+void
+copy_out_args(int argc, char **args, int *size, vaddr_t *stackptr, userptr_t *args_out_addr)
+{
+	userptr_t arg_addr = (userptr_t) (*stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
+	userptr_t *args_out = (userptr_t *) (*stackptr - argc*sizeof(userptr_t *) - sizeof(NULL));
+	for (int i = 0; i < argc; i++) {
+		arg_addr -= size[i];
+		*args_out = arg_addr;
+		string_out((const char *) args[i], arg_addr, (size_t) size[i]);
+		args_out++;
+		kfree(args[i]);
+	}
+
+	*args_out = NULL;
+	*args_out_addr = (userptr_t) (*stackptr - argc*sizeof(int) - sizeof(NULL));
+	arg_addr -= (int) arg_addr % sizeof(void *);
+	*stackptr = (vaddr_t) arg_addr;
+}
+
+/*
 Make crashed programs go back to kernel menu.
 */
 int
@@ -289,102 +357,4 @@ sys_execv(const char *prog, char **args)
 	/* enter_new_process does not return. */
 	panic("enter_new_process returned\n");
 	return EINVAL;
-}
-
-
-/*
- * Function which forks the current process to create a child.
- */
-int
-sys_fork(struct trapframe *tf, int32_t *retval0)
-{
-	struct proc *new_proc;
-	int ret;
-
-	ret = proc_create_fork("new_proc", &new_proc);
-	if(ret) {
-		return ret;
-	}
-
-	ret = pidtable_add(new_proc, &new_proc->pid);
-	if (ret){
-		proc_destroy(new_proc);
-		return ret;
-	}
-
-	struct trapframe *new_tf;
-	setup_forked_trapframe(tf, &new_tf);
-
-	*retval0 = new_proc->pid;
-	ret = thread_fork("new_thread", new_proc, enter_usermode, new_tf, 1);
-	if (ret) {
-		proc_destroy(new_proc);
-		kfree(new_tf);
-		return ret;
-	}
-
-	return 0;
-}
-/*
- * Sets up the memory structures for a newly forked process.
- */
-int
-proc_create_fork(const char *name, struct proc **new_proc)
-{
-	int ret;
-
-	*new_proc = proc_create(name);
-	if (*new_proc == NULL) {
-		return ENOMEM;
-	}
-
-	ret = as_copy(curproc->p_addrspace, &(*new_proc)->p_addrspace);
-	if (ret) {
-		proc_destroy(*new_proc);
-		return ret;
-	}
-
-	spinlock_acquire(&curproc->p_lock);
-	if (curproc->p_cwd != NULL) {
-		VOP_INCREF(curproc->p_cwd);
-		(*new_proc)->p_cwd = curproc->p_cwd;
-	}
-	spinlock_release(&curproc->p_lock);
-
-	struct ft *ft = curproc->proc_ft;
-	lock_acquire(ft->ft_lock);
-	ft_copy(ft, (*new_proc)->proc_ft);
-	lock_release(ft->ft_lock);
-
-	return 0;
-}
-
-int
-setup_forked_trapframe(struct trapframe *old_tf, struct trapframe **new_tf)
-{
-	*new_tf = kmalloc(sizeof(struct trapframe));
-	if (*new_tf == NULL) {
-		return ENOMEM;
-	}
-
-	memcpy((void *) *new_tf, (const void *) old_tf, sizeof(struct trapframe));
-	(*new_tf)->tf_v0 = 0;
-	(*new_tf)->tf_v1 = 0;
-	(*new_tf)->tf_a3 = 0;      /* signal no error */
-	(*new_tf)->tf_epc += 4;
-
-	return 0;
-}
-
-void
-enter_usermode(void *data1, unsigned long data2)
-{
-	(void) data2;
-	void *tf = (void *) curthread->t_stack + 16;
-
-	memcpy(tf, (const void *) data1, sizeof(struct trapframe));
-	kfree((struct trapframe *) data1);
-
-	as_activate();
-	mips_usermode(tf);
 }

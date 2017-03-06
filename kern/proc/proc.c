@@ -765,9 +765,9 @@ sys__exit(int32_t exit_status)
 
 
 
-
-
-
+/*
+Make crashed programs go back to kernel menu.
+*/
 
 
 
@@ -780,18 +780,11 @@ sys_execv(const char *prog, char **args)
 		return EFAULT;
 	}
 
-	if ((int) prog >= 0x40000000) {
-		return EFAULT;
-	}
-
 	char *progname;
-	size_t length;
-	ret = strlen_check(prog, PATH_MAX - 1, &length);
+	ret = string_in(prog, &progname, PATH_MAX);
 	if (ret) {
 		return ret;
 	}
-
-	string_in(prog, &progname, length);
 
 	int argc;
 	ret = get_argc(args, &argc);
@@ -884,22 +877,36 @@ get_argc(char **args, int *argc)
 	return 0;
 }
 
-void
+int
 string_in(const char *user_src, char **kern_dest, size_t copy_size)
 {
+	int ret;
+
 	copy_size++;
 	*kern_dest = kmalloc(copy_size*sizeof(char));
     size_t *path_len = kmalloc(sizeof(int));
-	copyinstr((const_userptr_t) user_src, *kern_dest, copy_size, path_len);
+	ret = copyinstr((const_userptr_t) user_src, *kern_dest, copy_size, path_len);
+	if (ret) {
+		return ret;
+	}
+
 	kfree(path_len);
+	return 0;
 }
 
-void
+int
 string_out(const char *kernel_src, userptr_t user_dest, size_t copy_size)
 {
+	int ret;
+
 	size_t *path_len = kmalloc(sizeof(int));
-	copyoutstr(kernel_src, user_dest, copy_size, path_len);
+	ret = copyoutstr(kernel_src, user_dest, copy_size, path_len);
+	if (ret) {
+		return ret;
+	}
+
 	kfree(path_len);
+	return 0;
 }
 
 /*
@@ -945,5 +952,6 @@ copy_out_args(int argc, char **args, int *size, vaddr_t *stackptr, userptr_t *ar
 
 	*args_out = NULL;
 	*args_out_addr = (userptr_t) (*stackptr - argc*sizeof(int) - sizeof(NULL));
+	arg_addr -= (int) arg_addr % sizeof(void *);
 	*stackptr = (vaddr_t) arg_addr;
 }

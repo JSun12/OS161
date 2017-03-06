@@ -128,10 +128,10 @@ void sys__exit(int32_t);
 int sys_execv(const char *, char **);
 int strlen_check(const char *, int, size_t*);
 int get_argc(char **, int *);
-void string_in(const char *, char **, size_t);
+int string_in(const char *, char **, size_t);
 int copy_in_args(int, char **, char **, int *);
 void copy_out_args(int, char **, int *, vaddr_t *, userptr_t *);
-void string_out(const char *, userptr_t, size_t);
+int string_out(const char *, userptr_t, size_t);
 
 
 

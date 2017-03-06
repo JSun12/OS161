@@ -736,9 +736,10 @@ sys__exit(int32_t exit_status)
 {
 	/* Use definitions from <kern/wait.h> to encode the waitcode status  */
 	int waitcode;
+	int switchcode;
 
-	exit_status = _WWHAT(exit_status);
-	switch (exit_status) {
+	switchcode = _WWHAT(exit_status);
+	switch (switchcode) {
 		case __WEXITED:
 		waitcode = _MKWAIT_EXIT(exit_status);
 		break;
@@ -755,7 +756,8 @@ sys__exit(int32_t exit_status)
 		/* Default to maintaining original status */
 		waitcode = exit_status;
 	}
-	pidtable_exit(curproc, waitcode);
+	(void) waitcode;
+	pidtable_exit(curproc, _MKWVAL(exit_status));
 	panic("Exit syscall should never get to this point.");
 }
 
@@ -775,6 +777,10 @@ sys_execv(const char *prog, char **args)
 	int ret;
 
 	if (prog == NULL || args == NULL) {
+		return EFAULT;
+	}
+
+	if ((int) prog >= 0x40000000) {
 		return EFAULT;
 	}
 

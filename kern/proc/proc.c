@@ -70,6 +70,58 @@ struct proc *kproc;
 /* Global PID table */
 struct pidtable *pidtable;
 
+/* Clears the pidtable for a given index */
+static void
+clear_pid(pid_t pid)
+{
+	KASSERT(lock_do_i_hold(pidtable->pid_lock));
+	pidtable->pid_available++;
+	pidtable->pid_procs[pid] = NULL;
+	pidtable->pid_status[pid] = READY;
+	pidtable->pid_waitcode[pid] = (int) NULL;
+}
+
+/* Adds a given process to the pidtable at the given index */
+static void
+add_pid(pid_t pid, struct proc *proc)
+{
+	KASSERT(lock_do_i_hold(pidtable->pid_lock));
+	pidtable->pid_procs[next] = proc;
+	pidtable->pid_status[next] = RUNNING;
+	pidtable->pid_waitcode[next] = (int) NULL;
+	pidtable->pid_available--;
+}
+
+/* Will update the status of children to either ORPHAN or ZOMBIE. */
+static void
+pidtable_update_children(struct proc *proc)
+{
+	KASSERT(lock_do_i_hold(pidtable->pid_lock));
+
+	int num_child = array_num(proc->children);
+
+	for(int i = num_child-1; i >= 0; i--){
+
+		struct proc *child = array_get(proc->children, i);
+		int child_pid = child->pid;
+
+		if(pidtable->pid_status[child_pid] == RUNNING){
+			pidtable->pid_status[child_pid] = ORPHAN;
+		}
+		else if (pidtable->pid_status[child_pid] == ZOMBIE){
+			/* Update the next pid indicator */
+			if(child_pid < pidtable->pid_next){
+				pidtable->pid_next = child_pid;
+			}
+			clear_pid(child_pid);
+			proc_destroy(child);
+		}
+		else{
+			panic("Tried to modify a child that did not exist.\n");
+		}
+	}
+}
+
 /*
  * Create a proc structure.
  */
@@ -414,17 +466,13 @@ pidtable_bootstrap()
 	}
 
 	/* Set the kernel thread parameters */
-	pidtable->pid_procs[kproc->pid] = kproc;
-	pidtable->pid_status[kproc->pid] = RUNNING;
-	pidtable->pid_waitcode[kproc->pid] = (int) NULL;
-	pidtable->pid_available = PID_MAX - 1;
+	pidtable->pid_available = 1; /* One space for the kernel process */
 	pidtable->pid_next = PID_MIN;
+	add_pid(kproc->pid, kproc);
 
-	/* Populate the initial PID stats array with ready status */
+	/* Create space for more pids within the table */
 	for (int i = PID_MIN; i < PID_MAX; i++){
-		pidtable->pid_procs[i] = NULL;
-		pidtable->pid_status[i] = READY;
-		pidtable->pid_waitcode[i] = (int) NULL;
+		clear_pid(i);
 	}
 }
 
@@ -435,46 +483,35 @@ pidtable_bootstrap()
 int
 pidtable_add(struct proc *proc, int32_t *retval)
 {
-	int output;
 	int next;
+	int output = 0;
 
 	lock_acquire(pidtable->pid_lock);
 
-	// Add the given process to the parent
+	if (pidtable->pid_available < 1){
+		lock_release(pidtable->pid_lock);
+		return ENPROC;
+	}
+
 	array_add(curproc->children, proc, NULL);
 
+	next = pidtable->pid_next;
+	*retval = next;
+
+	add_pid(next, proc);
+
+	/* Find the next available PID */
 	if(pidtable->pid_available > 0){
-		next = pidtable->pid_next;
-		*retval = next;
-		output = 0;
-
-		pidtable->pid_procs[next] = proc;
-		pidtable->pid_status[next] = RUNNING;
-		pidtable->pid_waitcode[next] = (int) NULL;
-		pidtable->pid_available--;
-
-		if(pidtable->pid_available > 0){
-			for (int i = next; i < PID_MAX; i++){
-				/* Find the next available PID */
-				if (pidtable->pid_status[i] == READY){
-					pidtable->pid_next = i;
-					break;
-				}
+		for (int i = next; i < PID_MAX; i++){
+			if (pidtable->pid_status[i] == READY){
+				pidtable->pid_next = i;
+				break;
 			}
 		}
-		else{
-			/*
-			 * Update pid_next to reflect that the table it full. The value we set it to is beyond
-			 * PID_MAX as when we remove, we update pid_next to be the lowest possible pid value we
-			 * have, which is always under PID_MAX + 1.
-			 */
-			pidtable->pid_next = PID_MAX + 1;
-		}
 	}
+	/* Put an out-of-bounds value to signify a full table */
 	else{
-		/* The PID table is full*/
-		retval = NULL;
-		output = ENPROC;
+		pidtable->pid_next = PID_MAX + 1;
 	}
 
 	lock_release(pidtable->pid_lock);
@@ -488,10 +525,8 @@ pidtable_add(struct proc *proc, int32_t *retval)
 void
 pidtable_exit(struct proc *proc, int32_t waitcode)
 {
-	//TODO: Orphan children of a parent
 	lock_acquire(pidtable->pid_lock);
 
-	/* Begin by orphaning all children */
 	pidtable_update_children(proc);
 
 	/* Case: Signal the parent that the child ended with waitcode given. */
@@ -501,10 +536,7 @@ pidtable_exit(struct proc *proc, int32_t waitcode)
 	}
 	/* Case: Parent already exited. Reset the current pidtable spot for later use. */
 	else if(pidtable->pid_status[proc->pid] == ORPHAN){
-		pidtable->pid_available++;
-		pidtable->pid_procs[proc->pid] = NULL;
-		pidtable->pid_status[proc->pid] = READY;
-		pidtable->pid_waitcode[proc->pid] = (int) NULL;
+		clear_pid(proc->pid);
 		proc_destroy(curproc);
 	}
 	else{
@@ -516,42 +548,5 @@ pidtable_exit(struct proc *proc, int32_t waitcode)
 
 	lock_release(pidtable->pid_lock);
 
-	// We might want to synchronize this more
 	thread_exit();
-}
-
-/*
- * Will update the status of children to either ORPHAN or ZOMBIE.
- */
-void
-pidtable_update_children(struct proc *proc)
-{
-	/* We assume that a function holding a lock calls this function */
-	KASSERT(lock_do_i_hold(pidtable->pid_lock));
-
-	int num_child = array_num(proc->children);
-	/* Loop downwards as removing children will cause array shrinking and disrupt indexing */
-	for(int i = num_child-1; i >= 0; i--){
-
-		struct proc *child = array_get(proc->children, i);
-		int child_pid = child->pid;
-		/* Signal to the child we don't need it anymore */
-		if(pidtable->pid_status[child_pid] == RUNNING){
-			pidtable->pid_status[child_pid] = ORPHAN;
-		}
-		else if (pidtable->pid_status[child_pid] == ZOMBIE){
-			/* Update the next pid indicator */
-			if(child_pid < pidtable->pid_next){
-				pidtable->pid_next = child_pid;
-			}
-			pidtable->pid_available++;
-			pidtable->pid_procs[child->pid] = NULL;
-			pidtable->pid_status[child->pid] = READY;
-			pidtable->pid_waitcode[child->pid] = (int) NULL;
-			proc_destroy(child);
-		}
-		else{
-			panic("Tried to modify a child that did not exist.\n");
-		}
-	}
 }

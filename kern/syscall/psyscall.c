@@ -352,6 +352,8 @@ sys_execv(const char *prog, char **args)
 	int *size = kmalloc(argc*sizeof(int));
 	ret = copy_in_args(argc, args, args_in, size);
 	if (ret) {
+		kfree(args_in);
+		kfree(size);
 		kfree(progname);
 		return ret;
 	}

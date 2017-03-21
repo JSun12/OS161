@@ -9,7 +9,8 @@
 #include <kern/errno.h>
 
 
-// static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
+// TODO: synchronize everything
+
 static struct coremap *cm;
 static p_page_t first_alloc_page; /* First physical page that can be dynamically allocated */ 
 static p_page_t last_page; /* One page past the last free physical page in RAM */
@@ -137,16 +138,6 @@ vm_tlbshootdown(const struct tlbshootdown *tlbsd)
 }
 
 
-// int
-// vm_fault(int faulttype, vaddr_t faultaddress)
-// {
-//     (void) faulttype; 
-//     (void) faultaddress;
-
-//     return 0; 
-// }
-
-
 static
 int
 l1_create(struct l1_pt **l1_pt)
@@ -218,9 +209,9 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     pid_t pid = curproc->pid;
     
     entryhi = 0 | fault_page | pid << 6; 
-    entrylo = 0 | p_page_addr | 0x0000600; // TODO: fix this magic number
+    entrylo = 0 | p_page_addr | TLBLO_VALID | TLBLO_DIRTY; // TODO: fix this magic number
 
-    tlb_random(entryhi, entrylo);
+    tlb_write(entryhi, entrylo, V_TO_INDEX(fault_page));
 
     return 0;
 }

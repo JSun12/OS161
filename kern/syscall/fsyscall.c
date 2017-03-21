@@ -73,7 +73,7 @@ sys_open(const char *filename, int flags, int32_t *output)
 	entry->rwflags = flags;
 
 	lock_acquire(ft->ft_lock);
-    result = add_entry(ft, entry, output);
+	result = add_entry(ft, entry, output);
 	lock_release(ft->ft_lock);
 
     if (result){

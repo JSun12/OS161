@@ -32,6 +32,7 @@
 #include <lib.h>
 #include <addrspace.h>
 #include <vm.h>
+#include <proc.h>
 
 /*
  * Note! If OPT_DUMBVM is set, as is the case until you start the VM
@@ -91,7 +92,7 @@ as_activate(void)
 {
 	struct addrspace *as;
 
-	as = curproc_getas();
+	as = proc_getas();
 	if (as == NULL) {
 		/*
 		 * Kernel thread without an address space; leave the
@@ -139,7 +140,7 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 	(void)readable;
 	(void)writeable;
 	(void)executable;
-	return EUNIMP;
+	return -1;
 }
 
 int

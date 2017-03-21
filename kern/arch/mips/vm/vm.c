@@ -4,31 +4,30 @@
 #include <lib.h>
 #include <mips/tlb.h>
 
-// create l1 tables (adjust coremap and l2), and free l1 page table (during coallecing)
 
 // static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
 static struct coremap *cm;
-static p_page_t first_alloc_page; /* First physical page that can be dynamically allocated */
+static p_page_t first_alloc_page; /* First physical page that can be dynamically allocated */ 
+static p_page_t last_page; /* One page past the last free physical page in RAM */
 
 void 
 vm_bootstrap()
 {
     paddr_t cm_paddr = ram_stealmem(COREMAP_PAGES);
-    if (cm_paddr == 0) {
-        kprintf("Not enough memory for coremap.\n"); // TODO: handle failure better
-    }
+    KASSERT(cm_paddr != 0);
 
     cm = (struct coremap *) PADDR_TO_KVADDR(cm_paddr);
 
     KASSERT(ram_stealmem(0) % PAGE_SIZE == 0);
     first_alloc_page = ADDR_TO_PAGE(ram_stealmem(0));
-
+    last_page = ADDR_TO_PAGE(ram_getsize());
+    
     size_t pages_used = first_alloc_page;
     v_page_t v_page;
     for (p_page_t p_page = 0; p_page < pages_used; p_page++) {
         v_page = PPAGE_TO_KVPAGE(p_page);
-        //put process id
-        cm->cm_entries[p_page] = 0 | PP_USED | v_page; 
+        pid_t pid = 1; 
+        cm->cm_entries[p_page] = 0 | PP_USED | v_page | pid << 20; // TODO: allocate pids better
     }
 }
 
@@ -45,38 +44,38 @@ p_page_used(struct coremap *cm, p_page_t p_page)
 vaddr_t
 alloc_kpages(size_t npages)
 {
-    //manage end of ram
-
     // Find contiguous free physical pages
-    p_page_t start = first_alloc_page; 
-    size_t offset = 0;
-    while (1) {
-        if (p_page_used(cm, start)) {
-            start++;
-            continue;
-        }
+    p_page_t start = first_alloc_page;     
+    while (start < last_page - npages) {
+        if (!p_page_used(cm, start)) {
+            size_t offset;
+            for (offset = 0; offset < npages; offset++) {
+                if (p_page_used(cm, start + offset)) {
+                    break;
+                }
+            }
 
-        offset = 0; 
-        while (!p_page_used(cm, start + offset) && offset + 1 < npages) {
-            offset++;
-        }
-
-        if (!p_page_used(cm, start + offset) && offset + 1 == npages) {
-            break;
-        }
+            if (offset == npages) {
+                break;
+            }
+        } 
 
         start++;
+    }
+
+    if (start == last_page - npages) {
+        return 0;
     }
 
     // Set the corresponding coremap entries
     v_page_t v_page;
     for (p_page_t p_page = start; p_page < start + npages; p_page++) {
-         v_page = PPAGE_TO_KVPAGE(p_page);
-        //put process id
-        cm->cm_entries[p_page] = 0 | PP_USED | v_page; 
+        v_page = PPAGE_TO_KVPAGE(p_page);
+        pid_t pid = 1;         
+        cm->cm_entries[p_page] = 0 | PP_USED | v_page | pid << 20; 
     }
 
-    cm->cm_entries[start + offset] = cm->cm_entries[start + offset] | KMALLOC_END;
+    cm->cm_entries[start + npages - 1] = cm->cm_entries[start + npages - 1] | KMALLOC_END;
 
     vaddr_t addr =  PADDR_TO_KVADDR(PAGE_TO_ADDR(start));
     kprintf("%x\n", addr);

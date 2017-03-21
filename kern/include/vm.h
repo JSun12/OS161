@@ -50,17 +50,19 @@
 #define KMALLOC_END          0x40000000    /* Bit indicating the last page of a kmalloc; used for kfree */
 #define VP_MASK              0x000fffff    /* Mask to extract the virtual page of the page frame */
 
-#define L_ONE_PT_NUM_ENTRIES 1024
+#define NUM_L2PT_ENTRIES     PAGE_SIZE/4
+#define NUM_L1PT_ENTRIES     PAGE_SIZE/4
+
+#define L2_PAGE_NUM_MASK     0xffc00000    /* Mask to get the L2 virtual page number */
+#define L1_PAGE_NUM_MASK     0x003ff000    /* Mask to get the L1 virtual page number */
+#define ENTRY_VALID          0x80000000    /* Bit indicating the valid bit of L2 and L1 PTEs */
+#define PAGE_MASK            0x000fffff    /* Mask to extract physical and virtual page from L1 and L2 PTEs */
+
 
 /*
-We do not need freelists for the coremap or l1 page tables. For coremap, we need used bit. 
-For 
-*/
-
-
-/*
-The coremap supports 16MB of physical RAM. Since cm_entry_t is a 32bit integer, 
-there are 2^12 cm_entries. The physical pages are indexed from 0 until 2^12 - 1,
+The coremap supports 16MB of physical RAM, since cm_entry_t is a 4 bytes, 
+and thus there are 2^12 cm_entries in 4 pages. However, we still use 20 bits 
+to index the physical pages. The physical pages are indexed from 0 until 2^12 - 1,
 each identically corresponding to the indices of the cm_entries.
 
 A coremap entry contains the corresponding vaddr page number and the process ID.
@@ -73,21 +75,39 @@ struct coremap {
 };
 
 
-// struct l1_pt {
-//     struct l1_entry l1_entries[L_ONE_PT_NUM_ENTRIES*sizeof(l1_entry)];
-// };  
+/*
+The L2 page table is a page table for page tables for a single address space. 
+Every entry is a 32 bit integer. The highest bit is the valid bit, indicating if the
+corresponding L1 page table is in memory. If the entry is valid, the virtual page number
+of the l1 page table is located on the lowers 20 bits (l1 will occupy a unique page, since it
+is exactly 1 page in size).
 
-// /*
-// An L1 page table entry has 2 four byte fields. The first uses 12 bits
-// to map to the physical page, and 20 bits to map to the next free virtual 
-// page in the virtual page free list. The second field uses 20 bits to 
-// as an offset value, for the amount of contiguous virtual pages which are free, 
-// or the number of contiguous pages which are allocated from kmalloc. 
-// */
-// struct l1_entry {
-//     uint32_t page_refs; 
-//     uint32_t status; 
-// };
+Followed by the valid bit is the modify/dirty bit. 
+
+Then is the reference bit. 
+
+The following 3 bits are the protection bits, namely the readable, writable, exectuable bits.
+*/
+struct l2_pt {
+    l2_entry_t l2_entries[NUM_L2PT_ENTRIES];
+};
+
+
+/*
+The L1 page table is a page table mapping virtual pages to physical pages. Every 
+entry is a 32 bit integer. The highest bit is the valid bit, indicating if the
+virtual page is mapped to a physical page in memory. If the entry is valid, 
+the physical page number is located on the lowers 20 bits.
+
+Followed by the valid bit is the modify/dirty bit. 
+
+Then is the reference bit. 
+
+The following 3 bits are the protection bits, namely the readable, writable, exectuable bits.
+*/
+struct l1_pt {
+    l1_entry_t l1_entries[NUM_L1PT_ENTRIES];
+};
 
 
 /* Initialization function */

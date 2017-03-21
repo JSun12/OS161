@@ -50,9 +50,10 @@ as_create(void)
 		return NULL;
 	}
 
-	/*
-	 * Initialize as needed.
-	 */
+	struct l2_pt *l2_pt = &as->l2_pt;
+	for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
+		l2_pt->l2_entries[v_l2] = 0x00000000;
+	}
 
 	return as;
 }

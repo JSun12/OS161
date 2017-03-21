@@ -58,7 +58,7 @@ struct addrspace {
         size_t as_npages2;
         paddr_t as_stackpbase;
 #else
-        /* Put stuff here for your VM system */
+        struct l2_pt l2_pt;
 #endif
 };
 

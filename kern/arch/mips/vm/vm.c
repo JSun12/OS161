@@ -1,6 +1,9 @@
 #include <types.h>
 #include <spinlock.h>
 #include <vm.h>
+#include <current.h>
+#include <proc.h>
+#include <addrspace.h>
 #include <lib.h>
 #include <mips/tlb.h>
 #include <kern/errno.h>
@@ -134,14 +137,14 @@ vm_tlbshootdown(const struct tlbshootdown *tlbsd)
 }
 
 
-int
-vm_fault(int faulttype, vaddr_t faultaddress)
-{
-    (void) faulttype; 
-    (void) faultaddress;
+// int
+// vm_fault(int faulttype, vaddr_t faultaddress)
+// {
+//     (void) faulttype; 
+//     (void) faultaddress;
 
-    return 0; 
-}
+//     return 0; 
+// }
 
 
 static
@@ -153,9 +156,11 @@ l1_create(struct l1_pt **l1_pt)
         return ENOMEM;
     }
 
-	for (v_page_l1_t v_l1 = 0; i < NUM_L1PT_ENTRIES; i++) {
-		*l1_pt->l1_entries[v_l1] = 0x00000000;
+	for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
+        (*l1_pt)->l1_entries[v_l1] = 0x00000000;
 	}
+
+    return 0;
 }
 
 
@@ -170,27 +175,27 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     v_page_l2_t v_l2 = (faultaddress & L2_PAGE_NUM_MASK) >> 22;
     v_page_l1_t v_l1 = (faultaddress & L1_PAGE_NUM_MASK) >> 12;
 
-    struct l2_pt *l2_pt = &curproc->p_addrspace->l2_pt;
+    struct l2_pt *l2_pt = &(curproc->p_addrspace)->l2_pt;
     l2_entry_t l2_entry = l2_pt->l2_entries[v_l2]; 
     
     struct l1_pt *l1_pt; 
 
     if (!(l2_entry & ENTRY_VALID)) {
-        result = l1_create(l1_pt);
+        result = l1_create(&l1_pt);
         if (result) {
             return result;
         }
 
-        KASSERT(l1_pt % PAGE_SIZE == 0); 
+        KASSERT(((uint32_t) l1_pt) % PAGE_SIZE == 0); 
 
-        v_page_t v_page = l1_pt >> 12; 
+        v_page_t v_page = ((uint32_t) l1_pt >> 12); 
         l2_pt->l2_entries[v_l2] = 0 | ENTRY_VALID | v_page;
     } else {
         v_page_t v_page = l2_entry & PAGE_MASK;
-        l1_pt = (struct l1_pt *) v_page << 12; // TODO: consider making a macro for page number to page address
+        l1_pt = (struct l1_pt *) ((uint32_t) v_page << 12); // TODO: consider making a macro for page number to page address
     }
 
-    l1_entry_t l1_entry = l1_pt->entries[v_l1];
+    l1_entry_t l1_entry = l1_pt->l1_entries[v_l1];
     p_page_t p_page; 
 
     if (!(l1_entry & ENTRY_VALID)) {
@@ -206,16 +211,16 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         p_page = l1_entry & PAGE_MASK;
     }
 
-    uint_32_t entryhi; 
-    uint_32_t entrylo; 
+    uint32_t entryhi; 
+    uint32_t entrylo; 
 
-    paddr_t p_page_addr = p_page << 12;
+    paddr_t p_page_addr = p_page << 12; // TODO: maybe make a macro for this
     pid_t pid = curproc->pid;
     
     entryhi = 0 | fault_page | pid << 6; 
     entrylo = 0 | p_page_addr | 0x0000600; // TODO: fix this magic number
 
-    tlb_write(entryhi, entrylo, 1);
+    tlb_random(entryhi, entrylo);
 
     return 0;
 }

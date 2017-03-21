@@ -45,7 +45,7 @@ typedef __u32 vaddr_t;
 typedef __u32 p_page_t;
 typedef __u32 v_page_t;
 typedef __u32 v_page_l2_t;
-typedef __u32 v_page_11_t;
+typedef __u32 v_page_l1_t;
 
 typedef __u32 cm_entry_t;
 typedef __u32 l2_entry_t;

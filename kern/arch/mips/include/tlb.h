@@ -94,6 +94,7 @@ int tlb_probe(uint32_t entryhi, uint32_t entrylo);
  */
 #define TLBHI_INVALID(entryno) ((0x80000+(entryno))<<12)
 #define TLBLO_INVALID()        (0)
+#define TLB_VALID_BIT          0x00000200
 
 /*
 We determine the 6 bit tlb index by consider the 4 LSBs

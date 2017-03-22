@@ -45,19 +45,31 @@
 #define VM_FAULT_READONLY    2    /* A write to a readonly page was attempted*/
 
 #define COREMAP_PAGES        4    /* Pages used for coremap */
-#define NUM_PPAGES           COREMAP_PAGES*PAGE_SIZE/4    /* Number of page frames managed by coremap */  
+#define NUM_PPAGES           COREMAP_PAGES*PAGE_SIZE/4    /* Number of page frames managed by coremap */ 
+#define VP_MASK              0x000fffff    /* Mask to extract the virtual page of the page frame */
+
 #define PP_USED              0x80000000    /* Bit indicating if physical page unused */
 #define KMALLOC_END          0x40000000    /* Bit indicating the last page of a kmalloc; used for kfree */
-#define VP_MASK              0x000fffff    /* Mask to extract the virtual page of the page frame */
+#define COPY_TO_WRITE        0x20000000    /* Bit indicating if page should be copied before writing */
+#define CM_PID(pid)          ((pid) << 20)
 
 #define NUM_L2PT_ENTRIES     PAGE_SIZE/4
 #define NUM_L1PT_ENTRIES     PAGE_SIZE/4
 
 #define L2_PAGE_NUM_MASK     0xffc00000    /* Mask to get the L2 virtual page number */
 #define L1_PAGE_NUM_MASK     0x003ff000    /* Mask to get the L1 virtual page number */
-#define ENTRY_VALID          0x80000000    /* Bit indicating the valid bit of L2 and L1 PTEs */
+#define L2_PNUM(vaddr)       (((vaddr) & L2_PAGE_NUM_MASK) >> 22)     
+#define L1_PNUM(vaddr)       (((vaddr) & L1_PAGE_NUM_MASK) >> 12)
+
 #define PAGE_MASK            0x000fffff    /* Mask to extract physical and virtual page from L1 and L2 PTEs */
 
+/* Page table entry status bits */
+#define ENTRY_VALID          0x80000000    
+#define ENTRY_DIRTY          0x40000000
+#define ENTRY_REFERENCE      0x20000000
+#define ENTRY_READABLE       0x10000000
+#define ENTRY_WRITABLE       0x08000000
+#define ENTRY_EXECUTABLE     0x04000000
 
 /*
 The coremap supports 16MB of physical RAM, since cm_entry_t is a 4 bytes, 
@@ -65,10 +77,22 @@ and thus there are 2^12 cm_entries in 4 pages. However, we still use 20 bits
 to index the physical pages. The physical pages are indexed from 0 until 2^12 - 1,
 each identically corresponding to the indices of the cm_entries.
 
-A coremap entry contains the corresponding vaddr page number and the process ID.
-It contains a free bit indicating if the physical page is free. For kmalloc, there
-is a kmalloc_end bit that is only set for the last page of a kmalloc. This is used 
-during kfree.
+A coremap entry contains the corresponding vaddr page number and the process ID 
+if the address is a user address. It contains a free bit indicating if the physical 
+page is free. For kmalloc, there is a kmalloc_end bit that is only set for the last 
+page of a kmalloc. This is used during kfree.
+
+The coremap supports copy on write. When a fork occurs, the l1 and l2 page of the original
+process is turned into read only, and the child has an identical l2 page table. When either
+the parent or child tries to write data, the corresponding tables must be changed to read write. 
+The first process to try writing to a virtual page will copy the contents of the virtual page
+to a different physical page, and switch the corresponding read only bit in the page table entry 
+tor read write. However, to infrom the other process that the particular virtual page has been 
+copied to a physical page, the coremap keeps the COPY_TO_WRITE bit, which indicates to a process 
+that when it is set, it is necessary to copy the contents to another page. Thus, during a fork, 
+this bit in the coremap is set in all physical pages corresponding to a virtual page. Note
+that l2 page tables are also copied on write, and a "write" is where one of it's pages
+are written to. 
 */
 struct coremap {
     cm_entry_t cm_entries[NUM_PPAGES];
@@ -109,6 +133,9 @@ struct l1_pt {
     l1_entry_t l1_entries[NUM_L1PT_ENTRIES];
 };
 
+
+/* Global coremap functions */
+void copy_to_write_set(p_page_t);
 
 /* Initialization function */
 void vm_bootstrap(void);

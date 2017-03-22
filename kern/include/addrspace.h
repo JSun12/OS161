@@ -118,6 +118,8 @@ int               as_prepare_load(struct addrspace *as);
 int               as_complete_load(struct addrspace *as);
 int               as_define_stack(struct addrspace *as, vaddr_t *initstackptr);
 
+int               l1_create(struct l1_pt **l1_pt);
+void              l2_init(struct l2_pt *l2_pt);
 
 /*
  * Functions in loadelf.c

@@ -50,8 +50,11 @@
 
 #define PP_USED              0x80000000    /* Bit indicating if physical page unused */
 #define KMALLOC_END          0x40000000    /* Bit indicating the last page of a kmalloc; used for kfree */
-#define COPY_TO_WRITE        0x20000000    /* Bit indicating if page should be copied before writing */
-#define CM_PID(pid)          ((pid) << 20)
+#define COPY_TO_WRITE        0x20000000    
+#define REF_COUNT            0x00fc0000    // TODO: maybe we need the pid number
+#define GET_REF(entry)       (((entry) & REF_COUNT) >> 20)
+#define SET_REF(entry, ref)  ((entry) = ((entry) & (~REF_COUNT)) | ((ref) << 20))
+// #define CM_PID(pid)          ((pid) << 20)
 
 #define NUM_L2PT_ENTRIES     PAGE_SIZE/4
 #define NUM_L1PT_ENTRIES     PAGE_SIZE/4
@@ -77,22 +80,22 @@ and thus there are 2^12 cm_entries in 4 pages. However, we still use 20 bits
 to index the physical pages. The physical pages are indexed from 0 until 2^12 - 1,
 each identically corresponding to the indices of the cm_entries.
 
-A coremap entry contains the corresponding vaddr page number and the process ID 
-if the address is a user address. It contains a free bit indicating if the physical 
+A coremap entry contains the corresponding vaddr page number (***and the process ID 
+if the address is a user address*** take out). It contains a free bit indicating if the physical 
 page is free. For kmalloc, there is a kmalloc_end bit that is only set for the last 
-page of a kmalloc. This is used during kfree.
+page of a kmalloc. This is used during kfree. There is a reference count for non kernel 
+physical pages of how page table entries map to the page.
 
 The coremap supports copy on write. When a fork occurs, the l1 and l2 page of the original
 process is turned into read only, and the child has an identical l2 page table. When either
 the parent or child tries to write data, the corresponding tables must be changed to read write. 
 The first process to try writing to a virtual page will copy the contents of the virtual page
 to a different physical page, and switch the corresponding read only bit in the page table entry 
-tor read write. However, to infrom the other process that the particular virtual page has been 
-copied to a physical page, the coremap keeps the COPY_TO_WRITE bit, which indicates to a process 
-that when it is set, it is necessary to copy the contents to another page. Thus, during a fork, 
-this bit in the coremap is set in all physical pages corresponding to a virtual page. Note
-that l2 page tables are also copied on write, and a "write" is where one of it's pages
-are written to. 
+tor read write. However, we do not want the last process with a reference to this physical page
+to copy it. Thus, the coremap keeps a reference count of the different virtual pages
+mapping to the physical page. When this is greater than 1, copying the physical page is
+necessary. Thus, when coyping an address space, the reference count must be incremented
+for the shared pages.
 */
 struct coremap {
     cm_entry_t cm_entries[NUM_PPAGES];
@@ -135,6 +138,8 @@ struct l1_pt {
 
 
 /* Global coremap functions */
+void cm_incref(p_page_t);
+void cm_decref(p_page_t);
 void copy_to_write_set(p_page_t);
 
 /* Initialization function */

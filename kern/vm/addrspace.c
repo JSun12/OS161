@@ -71,20 +71,37 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 		l2_pt_old->l2_entries[v_l2] = l2_pt_old->l2_entries[v_l2] & (~ENTRY_WRITABLE);
 
 		if (l2_pt_old->l2_entries[v_l2] & ENTRY_VALID) {
-			p_page_t p_page = KVPAGE_TO_PPAGE(l2_pt_old->l2_entries[v_l2] & PAGE_MASK);
-			copy_to_write_set(p_page);
+			p_page_t p_page1 = KVPAGE_TO_PPAGE(l2_pt_old->l2_entries[v_l2] & PAGE_MASK);
+			cm_incref(p_page1);
+			copy_to_write_set(p_page1);
 
 			struct l1_pt *l1_pt_old = (struct l1_pt *) PAGE_TO_ADDR(l2_pt_old->l2_entries[v_l2] & PAGE_MASK);
 
 			for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
 				l1_pt_old->l1_entries[v_l1] = l1_pt_old->l1_entries[v_l1] & (~ENTRY_WRITABLE);
 				p_page_t p_page = l1_pt_old->l1_entries[v_l1] & PAGE_MASK;
+				cm_incref(p_page);
 				copy_to_write_set(p_page);
 			}
 		}
 
 		l2_pt_new->l2_entries[v_l2] = l2_pt_old->l2_entries[v_l2];
 	}
+
+	// TODO: change the dirty bits of the correct process, not just invalidate all tlb entries
+
+	int spl = splhigh();
+	uint32_t entryhi; 
+	uint32_t entrylo; 
+	uint32_t index;
+
+	for (index = 0; index < NUM_TLB; index++) {
+		tlb_read(&entryhi, &entrylo, index);
+		entrylo = entrylo & (~TLB_VALID_BIT);
+		tlb_write(entryhi, entrylo, index);
+	}
+
+	splx(spl);
 
 	*ret = newas;
 	return 0;

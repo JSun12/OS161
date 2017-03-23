@@ -9,7 +9,8 @@
 #include <kern/errno.h>
 
 
-// TODO: synchronize everything
+// TODO: synchronize properly
+static struct spinlock lock = SPINLOCK_INITIALIZER;
 
 static struct coremap *cm;
 static p_page_t first_alloc_page; /* First physical page that can be dynamically allocated */ 
@@ -60,6 +61,12 @@ find_free(size_t npages, p_page_t *start)
     return 0; 
 }
 
+size_t
+cm_getref(p_page_t p_page)
+{
+    return GET_REF(cm->cm_entries[p_page]);
+}
+
 void
 cm_incref(p_page_t p_page)
 {
@@ -74,12 +81,6 @@ cm_decref(p_page_t p_page)
     size_t curref = GET_REF(cm->cm_entries[p_page]);
     curref--;
     SET_REF(cm->cm_entries[p_page], curref);
-}
-
-void
-copy_to_write_set(p_page_t p_page) 
-{
-    cm->cm_entries[p_page] = cm->cm_entries[p_page] | COPY_TO_WRITE;
 }
 
 void 
@@ -170,6 +171,8 @@ if not specified (that is, valid), assume readable and writable.
 int 
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
+    spinlock_acquire(&lock);
+
     int result;
     
     vaddr_t fault_page = faultaddress & PAGE_FRAME;
@@ -186,10 +189,9 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         if (faulttype == VM_FAULT_WRITE && !(l2_entry & ENTRY_WRITABLE)) {
             v_page_t v_page = l2_entry & PAGE_MASK;
             p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
-            cm_entry_t cm_entry = cm->cm_entries[p_page];
-            // kprintf("%d\n", curproc->pid);
+            // kprintf("REF: %d, L1_Page: %x, PID: %d\n", GET_REF(cm->cm_entries[p_page]), p_page, curproc->pid);
 
-            if (cm_entry & COPY_TO_WRITE) {
+            if (GET_REF(cm->cm_entries[p_page]) > 1) {
                 result = l1_create(&l1_pt); 
                 if (result) {
                     return result;
@@ -207,12 +209,12 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                         | ADDR_TO_PAGE((vaddr_t) l1_pt);
 
                 cm_incref(ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt)));
-
-                cm->cm_entries[p_page] = cm->cm_entries[p_page] & (~COPY_TO_WRITE);
+                cm_decref(p_page);
+                // kprintf("After: REF: %d, L1_Page: %x, PID: %d\n", GET_REF(cm->cm_entries[p_page]), p_page, curproc->pid);
+                
             // while(1);
             } else {
                 l2_pt->l2_entries[v_l2] = l2_pt->l2_entries[v_l2] | ENTRY_WRITABLE; 
-                v_page_t v_page = l2_entry & PAGE_MASK;
                 l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);   
                 // kprintf("%x\n", PAGE_TO_ADDR(v_page));            
             }
@@ -231,7 +233,9 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                 | ENTRY_VALID 
                                 | ENTRY_READABLE
                                 | ENTRY_WRITABLE
-                                | v_page;        
+                                | v_page; 
+
+        cm_incref(KVPAGE_TO_PPAGE(v_page));       
     }
 
     l1_entry_t l1_entry = l1_pt->l1_entries[v_l1];
@@ -240,10 +244,11 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     // Get the faulting address' physical address
     if (l1_entry & ENTRY_VALID) {
         if (faulttype == VM_FAULT_WRITE && !(l1_entry & ENTRY_WRITABLE)) {
-            p_page_t page = l1_entry & PAGE_MASK;
-            cm_entry_t cm_entry = cm->cm_entries[page];
+            p_page_t old_page = l1_entry & PAGE_MASK;
 
-            if (cm_entry & COPY_TO_WRITE) {
+            // kprintf("REF: %d, DATA_Page: %x, PID: %d\n", GET_REF(cm->cm_entries[old_page]), old_page, curproc->pid);
+            if (GET_REF(cm->cm_entries[old_page]) > 1) {
+                // TODO: reduce code repetition with kmalloc
                 p_page = first_alloc_page;     
                 result = find_free(1, &p_page); 
                 if (result) {
@@ -252,23 +257,23 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 
                 cm->cm_entries[p_page] = 0 
                                        | PP_USED
-                                       | (cm_entry & PAGE_MASK);
-                                       
+                                       | ADDR_TO_PAGE(fault_page);
+                                            
                 cm_incref(p_page);
+                cm_decref(old_page);
 
                 // TODO: get rid of this dirty hack
-                const void *src = (const void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(page));
+                const void *src = (const void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(old_page));
                 void *dst = (void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(p_page)); 
                 memmove(dst, src, (size_t) PAGE_SIZE);
 
-            // kprintf("@");
+                // kprintf("@");
                 l1_pt->l1_entries[v_l1] = 0 
                                         | ENTRY_VALID 
                                         | ENTRY_READABLE
                                         | ENTRY_WRITABLE
                                         | p_page;
-
-                cm->cm_entries[page] = cm->cm_entries[page] & (~COPY_TO_WRITE);
+                // kprintf("After: REF: %d, DATA_Page: %x, PID: %d\n", GET_REF(cm->cm_entries[old_page]), old_page, curproc->pid);
             } else {
                 l1_pt->l1_entries[v_l1] = l1_pt->l1_entries[v_l1] | ENTRY_WRITABLE;
                 p_page = l1_pt->l1_entries[v_l1] & PAGE_MASK;
@@ -285,13 +290,14 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         
         cm->cm_entries[p_page] = 0 
                                 | PP_USED
-                                | fault_page;
+                                | ADDR_TO_PAGE(fault_page);
 
         l1_pt->l1_entries[v_l1] = 0 
                                 | ENTRY_VALID 
                                 | ENTRY_READABLE
                                 | ENTRY_WRITABLE
                                 | p_page;
+        cm_incref(p_page);
     }
 
     uint32_t entryhi; 
@@ -305,5 +311,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     tlb_write(entryhi, entrylo, V_TO_INDEX(fault_page));
 
+    spinlock_release(&lock);
     return 0;
 }

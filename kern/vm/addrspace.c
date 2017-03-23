@@ -73,7 +73,6 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 		if (l2_pt_old->l2_entries[v_l2] & ENTRY_VALID) {
 			p_page_t p_page1 = KVPAGE_TO_PPAGE(l2_pt_old->l2_entries[v_l2] & PAGE_MASK);
 			cm_incref(p_page1);
-			copy_to_write_set(p_page1);
 
 			struct l1_pt *l1_pt_old = (struct l1_pt *) PAGE_TO_ADDR(l2_pt_old->l2_entries[v_l2] & PAGE_MASK);
 
@@ -81,7 +80,6 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 				l1_pt_old->l1_entries[v_l1] = l1_pt_old->l1_entries[v_l1] & (~ENTRY_WRITABLE);
 				p_page_t p_page = l1_pt_old->l1_entries[v_l1] & PAGE_MASK;
 				cm_incref(p_page);
-				copy_to_write_set(p_page);
 			}
 		}
 

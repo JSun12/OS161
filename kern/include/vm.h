@@ -54,6 +54,10 @@ TODO: forktest almost works, but with 512k, we run out of memory. We may need sw
 Also, we have to check for valid fault address (current, commented out check breaks forktest). We
 must do this to sbrktest (where unallocated heap virtual addresses are passed; we must kill
 the process when this happens).
+
+
+TODO: we need to implement tlb shootdown in order to use the vm on multiple
+processors.
 */
 
 

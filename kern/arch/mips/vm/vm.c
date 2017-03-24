@@ -2,6 +2,7 @@
 #include <spinlock.h>
 #include <vm.h>
 #include <current.h>
+#include <signal.h>
 #include <proc.h>
 #include <addrspace.h>
 #include <lib.h>
@@ -10,6 +11,7 @@
 
 
 // TODO: synchronize properly
+// NOTE: reference counts are touched in sbrk and addrspace destroy
 static struct spinlock lock = SPINLOCK_INITIALIZER;
 
 static struct coremap *cm;
@@ -61,6 +63,13 @@ find_free(size_t npages, p_page_t *start)
     return 0; 
 }
 
+void
+free_ppage(p_page_t p_page) 
+{
+    KASSERT(first_alloc_page <= p_page && p_page < last_page);
+    cm->cm_entries[p_page] = 0; 
+}
+
 size_t
 cm_getref(p_page_t p_page)
 {
@@ -101,20 +110,17 @@ vm_bootstrap()
     }
 }
 
-/* Allocate/free some kernel-space virtual pages */
 vaddr_t
 alloc_kpages(size_t npages)
 {
     int result; 
 
-    // Find contiguous free physical pages
     p_page_t start = first_alloc_page;     
     result = find_free(npages, &start); 
     if (result) {
         return 0;
     }
 
-    // Set the corresponding coremap entries
     for (p_page_t p_page = start; p_page < start + npages; p_page++) {
         kalloc_ppage(p_page);
     }
@@ -157,9 +163,6 @@ vm_tlbshootdown(const struct tlbshootdown *tlbsd)
 }
 
 
-// TODO: make sure users can't access kernel addresses
-// make sure to set tlb dirty bit as clear to enforce read only
-
 /*
 currently, readable and writable valid PTEs, user faultaddress. Now, when 
 read only PTEs are there, if faulttype is read, then same as before, but if 
@@ -171,6 +174,13 @@ if not specified (that is, valid), assume readable and writable.
 int 
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
+    struct addrspace *as = curproc->p_addrspace;
+
+    // TODO: do a proper address check (make sure kernel addresses aren't called)
+    if (as->brk <= faultaddress && faultaddress < as->stack_top) {
+        return SIGSEGV;
+    }
+
     spinlock_acquire(&lock);
 
     int result;
@@ -179,7 +189,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     v_page_l2_t v_l2 = L2_PNUM(fault_page);
     v_page_l1_t v_l1 = L1_PNUM(fault_page);
 
-    struct l2_pt *l2_pt = &(curproc->p_addrspace)->l2_pt;
+    struct l2_pt *l2_pt = as->l2_pt;
     l2_entry_t l2_entry = l2_pt->l2_entries[v_l2]; 
     
     struct l1_pt *l1_pt; 
@@ -191,7 +201,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
             // kprintf("REF: %d, L1_Page: %x, PID: %d\n", GET_REF(cm->cm_entries[p_page]), p_page, curproc->pid);
 
-            if (GET_REF(cm->cm_entries[p_page]) > 1) {
+            if (cm_getref(p_page) > 1) {
                 result = l1_create(&l1_pt); 
                 if (result) {
                     return result;
@@ -247,7 +257,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             p_page_t old_page = l1_entry & PAGE_MASK;
 
             // kprintf("REF: %d, DATA_Page: %x, PID: %d\n", GET_REF(cm->cm_entries[old_page]), old_page, curproc->pid);
-            if (GET_REF(cm->cm_entries[old_page]) > 1) {
+            if (cm_getref(old_page) > 1) {
                 // TODO: reduce code repetition with kmalloc
                 p_page = first_alloc_page;     
                 result = find_free(1, &p_page); 
@@ -312,5 +322,106 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     tlb_write(entryhi, entrylo, V_TO_INDEX(fault_page));
 
     spinlock_release(&lock);
+    return 0;
+}
+
+void
+free_vpage(struct l2_pt *l2_pt, v_page_t v_page)
+{
+    KASSERT(l2_pt != NULL); 
+    
+    v_page_l2_t v_l2 = L2_PNUM(PAGE_TO_ADDR(v_page));
+    v_page_l1_t v_l1 = L1_PNUM(PAGE_TO_ADDR(v_page));
+
+    v_page_t l1_pt_page = l2_pt->l2_entries[v_l2] & PAGE_MASK;
+    struct l1_pt *l1_pt = (struct l1_pt*) PAGE_TO_ADDR(l1_pt_page);
+
+    l1_entry_t l1_entry = l1_pt->l1_entries[v_l1];
+
+    if (l1_entry & ENTRY_VALID) {
+        p_page_t p_page = l1_entry & PAGE_MASK;
+
+        if (cm_getref(p_page) > 1) {
+            cm_decref(p_page);
+        } else {
+            free_ppage(p_page);
+        }
+    }
+}
+
+void
+free_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2)
+{
+    v_page_t v_page = l2_pt->l2_entries[v_l2] & PAGE_MASK;
+    p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
+
+    if (cm_getref(p_page) > 1) {
+        cm_decref(p_page);
+    } else {
+        struct l1_pt *l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);
+        kfree(l1_pt);
+    }
+
+    l2_pt->l2_entries[v_l2] = 0; 
+}
+
+int
+sys_sbrk(size_t amount, int32_t *retval0)
+{
+    if (amount % PAGE_SIZE) {
+        return EINVAL;
+    }
+
+    struct addrspace *as = curproc->p_addrspace;
+
+    vaddr_t old_heap_end = as->brk;
+    vaddr_t new_heap_end = old_heap_end + amount;
+    if (new_heap_end < as->heap_base) {
+        return EINVAL;
+    }
+
+    if (new_heap_end > as->stack_top) {
+        return ENOMEM;
+    }
+
+    // Free physical pages of deallocated virtual pages
+    if (new_heap_end < old_heap_end) {
+        v_page_l2_t old_l2 = L2_PNUM(old_heap_end); 
+        v_page_l1_t old_l1 = L1_PNUM(old_heap_end);
+        v_page_l2_t new_l2 = L2_PNUM(new_heap_end);
+        v_page_l1_t new_l1 = L1_PNUM(new_heap_end);
+        struct l2_pt *l2_pt = as->l2_pt;
+
+        if (old_l2 == new_l2) {
+            for (v_page_l1_t v_l1 = new_l1; v_l1 < old_l1; v_l1++) {
+                v_page_t v_page = PNUM_TO_PAGE(new_l2, v_l1);
+                free_vpage(l2_pt, v_page);
+            }
+        } else {
+            for (v_page_l2_t v_l2 = new_l2 + 1; v_l2 < old_l2; v_l2++) {
+                for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
+                    v_page_t v_page = PNUM_TO_PAGE(v_l2, v_l1);
+                    free_vpage(l2_pt, v_page);
+                }
+
+                free_l1_pt(l2_pt, v_l2);
+            }
+
+            for (v_page_l1_t v_l1 = 0; v_l1 < old_l1; v_l1++) {
+                v_page_t v_page = PNUM_TO_PAGE(old_l2, v_l1); 
+                free_vpage(l2_pt, v_page);
+            }
+
+            free_l1_pt(l2_pt, old_l2);
+
+            for (v_page_l1_t v_l1 = new_l1; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
+                v_page_t v_page = PNUM_TO_PAGE(new_l2, v_l1);
+                free_vpage(l2_pt, v_page);
+            }
+        }
+    }
+
+    *retval0 = old_heap_end; 
+    as->brk = new_heap_end;
     return 0;
 }

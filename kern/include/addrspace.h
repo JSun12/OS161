@@ -58,7 +58,10 @@ struct addrspace {
         size_t as_npages2;
         paddr_t as_stackpbase;
 #else
-        struct l2_pt l2_pt;
+        struct l2_pt *l2_pt;
+        vaddr_t heap_base;
+        vaddr_t stack_top;
+        vaddr_t brk;
 #endif
 };
 

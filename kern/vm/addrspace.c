@@ -13,6 +13,9 @@
  * used. The cheesy hack versions in dumbvm.c are used instead.
  */
 
+// TODO: better synchronizations
+static struct spinlock lock = SPINLOCK_INITIALIZER;
+
 int
 l1_create(struct l1_pt **l1_pt)
 {
@@ -48,7 +51,16 @@ as_create(void)
 		return NULL;
 	}
 
-	l2_init(&as->l2_pt);
+	as->l2_pt = kmalloc(sizeof(struct l2_pt)); 
+	if (as->l2_pt == NULL) {
+		kfree(as);
+		return NULL;
+	}
+
+	l2_init(as->l2_pt);
+	as->heap_base = 0; 
+	as->stack_top = USERSTACK - STACK_SIZE; // TODO get proper stack 
+	as->brk = 0;
 
 	return as;
 }
@@ -56,23 +68,24 @@ as_create(void)
 int
 as_copy(struct addrspace *old, struct addrspace **ret)
 {
+	spinlock_acquire(&lock);
+
 	struct addrspace *newas;
-	// int result;
 
 	newas = as_create();
 	if (newas==NULL) {
 		return ENOMEM;
 	}
 
-	struct l2_pt *l2_pt_new = &newas->l2_pt;
-	struct l2_pt *l2_pt_old = &old->l2_pt;
+	struct l2_pt *l2_pt_new = newas->l2_pt;
+	struct l2_pt *l2_pt_old = old->l2_pt;
 
 	for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
 		l2_pt_old->l2_entries[v_l2] = l2_pt_old->l2_entries[v_l2] & (~ENTRY_WRITABLE);
 
 		if (l2_pt_old->l2_entries[v_l2] & ENTRY_VALID) {
 			p_page_t p_page1 = KVPAGE_TO_PPAGE(l2_pt_old->l2_entries[v_l2] & PAGE_MASK);
-			cm_incref(p_page1);
+			cm_incref(p_page1); // TODO: maybe change this name p_page1
 
 			struct l1_pt *l1_pt_old = (struct l1_pt *) PAGE_TO_ADDR(l2_pt_old->l2_entries[v_l2] & PAGE_MASK);
 
@@ -101,13 +114,48 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 
 	splx(spl);
 
+	newas->heap_base = old->heap_base;
+	newas->stack_top = old->stack_top;
 	*ret = newas;
+
+	spinlock_release(&lock);
 	return 0;
 }
 
 void
 as_destroy(struct addrspace *as)
 {
+	struct l2_pt *l2_pt = as->l2_pt; 
+	
+	for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
+		l2_entry_t l2_entry = l2_pt->l2_entries[v_l2];
+
+		if (l2_entry & ENTRY_VALID) {
+			v_page_t v_page_l1 = l2_entry & PAGE_MASK;
+			struct l1_pt *l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page_l1);
+
+			for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
+				l1_entry_t l1_entry = l1_pt->l1_entries[v_l1];
+
+				if (l1_entry & ENTRY_VALID) {
+					p_page_t p_page = l1_entry & PAGE_MASK;
+
+					if (cm_getref(p_page) > 1) {
+						cm_decref(p_page);
+					} else {
+						free_ppage(p_page);
+					}
+				}
+
+			}
+
+			if (cm_getref(KVPAGE_TO_PPAGE(v_page_l1)) == 1) {
+				kfree(l1_pt);
+			}
+		}
+	}
+
+	kfree(as->l2_pt); 
 	kfree(as);
 }
 
@@ -159,13 +207,21 @@ as_deactivate(void)
  * moment, these are ignored. When you write the VM system, you may
  * want to implement them.
  */
+
+// TOOD: get regions properly, allocate stack better.
 int
 as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 		 int readable, int writeable, int executable)
 {
-	/*
-	 * Write this.
-	 */
+	// TODO: hacky; determine what this should really do
+	vaddr_t region_end = vaddr + sz; 
+	if (region_end > as->heap_base) {
+		vaddr_t page_aligned_end = VPAGE_ADDR_MASK & region_end;
+		page_aligned_end += PAGE_SIZE;
+
+		as->heap_base = page_aligned_end; 
+		as->brk = as->heap_base;
+	}
 
 	(void)as;
 	(void)vaddr;

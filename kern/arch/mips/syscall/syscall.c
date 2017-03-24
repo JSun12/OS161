@@ -40,6 +40,7 @@
 #include <fsyscall.h>
 #include <psyscall.h>
 #include <syscall.h>
+#include <vm.h>
 #include <kern/wait.h>
 
 /*
@@ -171,6 +172,10 @@ syscall(struct trapframe *tf)
 		int waitcode = (int) _MKWAIT_EXIT(tf->tf_a0);
 		sys__exit(waitcode);
 		panic("The exit syscall should never return");
+		break;
+
+		case SYS_sbrk:
+		err = sys_sbrk((size_t) tf->tf_a0, &retval0);
 		break;
 
 	    default:

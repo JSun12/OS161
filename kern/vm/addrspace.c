@@ -13,8 +13,8 @@
  * used. The cheesy hack versions in dumbvm.c are used instead.
  */
 
-// TODO: better synchronizations
-static struct spinlock lock = SPINLOCK_INITIALIZER;
+extern struct cm *cm;
+extern struct spinlock cm_spinlock;
 
 int
 l1_create(struct l1_pt **l1_pt)
@@ -51,8 +51,15 @@ as_create(void)
 		return NULL;
 	}
 
+	as->as_lock = lock_create("lock");
+	if (as->as_lock == NULL) {
+		kfree(as); 
+		return NULL;
+	}
+
 	as->l2_pt = kmalloc(sizeof(struct l2_pt)); 
 	if (as->l2_pt == NULL) {
+		lock_destroy(as->as_lock);
 		kfree(as);
 		return NULL;
 	}
@@ -68,14 +75,14 @@ as_create(void)
 int
 as_copy(struct addrspace *old, struct addrspace **ret)
 {
-	spinlock_acquire(&lock);
-
 	struct addrspace *newas;
 
 	newas = as_create();
 	if (newas==NULL) {
 		return ENOMEM;
 	}
+
+	lock_acquire(old->as_lock);
 
 	struct l2_pt *l2_pt_new = newas->l2_pt;
 	struct l2_pt *l2_pt_old = old->l2_pt;
@@ -85,21 +92,35 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 
 		if (l2_pt_old->l2_entries[v_l2] & ENTRY_VALID) {
 			p_page_t p_page1 = KVPAGE_TO_PPAGE(l2_pt_old->l2_entries[v_l2] & PAGE_MASK);
+
+			spinlock_acquire(&cm_spinlock);
 			cm_incref(p_page1); // TODO: maybe change this name p_page1
+			spinlock_release(&cm_spinlock);
 
 			struct l1_pt *l1_pt_old = (struct l1_pt *) PAGE_TO_ADDR(l2_pt_old->l2_entries[v_l2] & PAGE_MASK);
 
 			for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
 				l1_pt_old->l1_entries[v_l1] = l1_pt_old->l1_entries[v_l1] & (~ENTRY_WRITABLE);
 				p_page_t p_page = l1_pt_old->l1_entries[v_l1] & PAGE_MASK;
+
+				spinlock_acquire(&cm_spinlock);
 				cm_incref(p_page);
+				spinlock_release(&cm_spinlock);
 			}
 		}
 
 		l2_pt_new->l2_entries[v_l2] = l2_pt_old->l2_entries[v_l2];
 	}
 
+	newas->heap_base = old->heap_base;
+	newas->stack_top = old->stack_top;
+	*ret = newas;
+
+	lock_release(old->as_lock);
+
 	// TODO: change the dirty bits of the correct process, not just invalidate all tlb entries
+
+	// TODO: reduce code repetition (similar to as_activate)
 
 	int spl = splhigh();
 	uint32_t entryhi; 
@@ -114,11 +135,6 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 
 	splx(spl);
 
-	newas->heap_base = old->heap_base;
-	newas->stack_top = old->stack_top;
-	*ret = newas;
-
-	spinlock_release(&lock);
 	return 0;
 }
 
@@ -140,21 +156,29 @@ as_destroy(struct addrspace *as)
 				if (l1_entry & ENTRY_VALID) {
 					p_page_t p_page = l1_entry & PAGE_MASK;
 
+					spinlock_acquire(&cm_spinlock);
+
 					if (cm_getref(p_page) > 1) {
 						cm_decref(p_page);
 					} else {
 						free_ppage(p_page);
 					}
-				}
 
+					spinlock_release(&cm_spinlock);
+				}
 			}
 
-			if (cm_getref(KVPAGE_TO_PPAGE(v_page_l1)) == 1) {
+			spinlock_acquire(&cm_spinlock);
+			size_t refs = cm_getref(KVPAGE_TO_PPAGE(v_page_l1)) == 1;
+			spinlock_release(&cm_spinlock);
+
+			if (refs == 1) {
 				kfree(l1_pt);
 			}
 		}
 	}
 
+	lock_destroy(as->as_lock);
 	kfree(as->l2_pt); 
 	kfree(as);
 }
@@ -166,10 +190,6 @@ as_activate(void)
 
 	as = proc_getas();
 	if (as == NULL) {
-		/*
-		 * Kernel thread without an address space; leave the
-		 * prior address space in place.
-		 */
 		return;
 	}
 
@@ -208,12 +228,19 @@ as_deactivate(void)
  * want to implement them.
  */
 
-// TOOD: get regions properly, allocate stack better.
 int
 as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 		 int readable, int writeable, int executable)
 {
-	// TODO: hacky; determine what this should really do
+	/*
+	This function is implemented assuming that as_define_region is called
+	by load_elf to allocate space for user program code and static variables. 
+	Thus, the top of this region should be available for heap. This implementation
+	finds this top. 
+	
+	TODO: However, there might be more we should do to implement
+	as_define_region properly.
+	*/
 	vaddr_t region_end = vaddr + sz; 
 	if (region_end > as->heap_base) {
 		vaddr_t page_aligned_end = VPAGE_ADDR_MASK & region_end;

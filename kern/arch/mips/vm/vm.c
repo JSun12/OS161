@@ -10,11 +10,9 @@
 #include <kern/errno.h>
 
 
-// TODO: synchronize properly
-// NOTE: reference counts are touched in sbrk and addrspace destroy
-static struct spinlock lock = SPINLOCK_INITIALIZER;
+struct coremap *cm;
+struct spinlock cm_spinlock = SPINLOCK_INITIALIZER;
 
-static struct coremap *cm;
 static p_page_t first_alloc_page; /* First physical page that can be dynamically allocated */ 
 static p_page_t last_page; /* One page past the last free physical page in RAM */
 
@@ -114,10 +112,18 @@ vaddr_t
 alloc_kpages(size_t npages)
 {
     int result; 
+    bool acquired = spinlock_do_i_hold(&cm_spinlock);
+
+    if (!acquired) {
+        spinlock_acquire(&cm_spinlock);
+    }
 
     p_page_t start = first_alloc_page;     
     result = find_free(npages, &start); 
     if (result) {
+        if (!acquired) {
+            spinlock_release(&cm_spinlock);
+        }
         return 0;
     }
 
@@ -126,6 +132,11 @@ alloc_kpages(size_t npages)
     }
 
     cm->cm_entries[start + npages - 1] = cm->cm_entries[start + npages - 1] | KMALLOC_END;
+
+    if (!acquired) {
+        spinlock_release(&cm_spinlock);
+    }
+
     return PADDR_TO_KVADDR(PAGE_TO_ADDR(start));
 }
 
@@ -136,13 +147,26 @@ free_kpages(vaddr_t addr)
 {
     p_page_t curr = ADDR_TO_PAGE(KVADDR_TO_PADDR(addr));
     bool end;
+    bool acquired = spinlock_do_i_hold(&cm_spinlock);
+
+    if (!acquired) {
+        spinlock_acquire(&cm_spinlock);
+    }
+
     while (p_page_used(curr)) {
         end = cm->cm_entries[curr] & KMALLOC_END;
         cm->cm_entries[curr] = 0x00000000;
         if (end) {
+            if (!acquired) {
+                spinlock_release(&cm_spinlock);
+            }
             return;
         }
         curr++;
+    }
+
+    if (!acquired) {
+        spinlock_release(&cm_spinlock);
     }
 }
 
@@ -164,6 +188,7 @@ vm_tlbshootdown(const struct tlbshootdown *tlbsd)
 
 
 /*
+(Pasindu's thoughts; don't worry if this is gibberish):
 currently, readable and writable valid PTEs, user faultaddress. Now, when 
 read only PTEs are there, if faulttype is read, then same as before, but if 
 faulttype is write, we copy physical page content to another physical page, 
@@ -177,17 +202,17 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     struct addrspace *as = curproc->p_addrspace;
 
     // TODO: do a proper address check (make sure kernel addresses aren't called)
-    if (as->brk <= faultaddress && faultaddress < as->stack_top) {
-        return SIGSEGV;
-    }
-
-    spinlock_acquire(&lock);
+    // if (as->brk <= faultaddress && faultaddress < as->stack_top) {
+    //     return SIGSEGV;
+    // }
 
     int result;
-    
+
     vaddr_t fault_page = faultaddress & PAGE_FRAME;
     v_page_l2_t v_l2 = L2_PNUM(fault_page);
     v_page_l1_t v_l1 = L1_PNUM(fault_page);
+
+    lock_acquire(as->as_lock);
 
     struct l2_pt *l2_pt = as->l2_pt;
     l2_entry_t l2_entry = l2_pt->l2_entries[v_l2]; 
@@ -199,11 +224,14 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         if (faulttype == VM_FAULT_WRITE && !(l2_entry & ENTRY_WRITABLE)) {
             v_page_t v_page = l2_entry & PAGE_MASK;
             p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
-            // kprintf("REF: %d, L1_Page: %x, PID: %d\n", GET_REF(cm->cm_entries[p_page]), p_page, curproc->pid);
+
+            spinlock_acquire(&cm_spinlock);
 
             if (cm_getref(p_page) > 1) {
                 result = l1_create(&l1_pt); 
                 if (result) {
+
+                    spinlock_release(&cm_spinlock);
                     return result;
                 }
 
@@ -220,14 +248,12 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
                 cm_incref(ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt)));
                 cm_decref(p_page);
-                // kprintf("After: REF: %d, L1_Page: %x, PID: %d\n", GET_REF(cm->cm_entries[p_page]), p_page, curproc->pid);
-                
-            // while(1);
             } else {
                 l2_pt->l2_entries[v_l2] = l2_pt->l2_entries[v_l2] | ENTRY_WRITABLE; 
                 l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);   
-                // kprintf("%x\n", PAGE_TO_ADDR(v_page));            
             }
+
+            spinlock_release(&cm_spinlock);
         } else {
             v_page_t v_page = l2_entry & PAGE_MASK;
             l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);
@@ -238,6 +264,8 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             return result;
         }
 
+        spinlock_acquire(&cm_spinlock);
+
         v_page_t v_page = ADDR_TO_PAGE((vaddr_t) l1_pt); 
         l2_pt->l2_entries[v_l2] = 0 
                                 | ENTRY_VALID 
@@ -245,7 +273,9 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                 | ENTRY_WRITABLE
                                 | v_page; 
 
-        cm_incref(KVPAGE_TO_PPAGE(v_page));       
+        cm_incref(KVPAGE_TO_PPAGE(v_page)); 
+
+        spinlock_release(&cm_spinlock);      
     }
 
     l1_entry_t l1_entry = l1_pt->l1_entries[v_l1];
@@ -256,12 +286,14 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         if (faulttype == VM_FAULT_WRITE && !(l1_entry & ENTRY_WRITABLE)) {
             p_page_t old_page = l1_entry & PAGE_MASK;
 
-            // kprintf("REF: %d, DATA_Page: %x, PID: %d\n", GET_REF(cm->cm_entries[old_page]), old_page, curproc->pid);
+            spinlock_acquire(&cm_spinlock);
+
             if (cm_getref(old_page) > 1) {
                 // TODO: reduce code repetition with kmalloc
                 p_page = first_alloc_page;     
                 result = find_free(1, &p_page); 
                 if (result) {
+                    spinlock_release(&cm_spinlock);
                     return result;
                 }
                 
@@ -277,24 +309,27 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 void *dst = (void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(p_page)); 
                 memmove(dst, src, (size_t) PAGE_SIZE);
 
-                // kprintf("@");
                 l1_pt->l1_entries[v_l1] = 0 
                                         | ENTRY_VALID 
                                         | ENTRY_READABLE
                                         | ENTRY_WRITABLE
                                         | p_page;
-                // kprintf("After: REF: %d, DATA_Page: %x, PID: %d\n", GET_REF(cm->cm_entries[old_page]), old_page, curproc->pid);
             } else {
                 l1_pt->l1_entries[v_l1] = l1_pt->l1_entries[v_l1] | ENTRY_WRITABLE;
                 p_page = l1_pt->l1_entries[v_l1] & PAGE_MASK;
             }
+
+            spinlock_release(&cm_spinlock);
         } else {
             p_page = l1_pt->l1_entries[v_l1] & PAGE_MASK;
         }
     } else {
+        spinlock_acquire(&cm_spinlock);
+
         p_page = first_alloc_page;     
         result = find_free(1, &p_page); 
         if (result) {
+            spinlock_release(&cm_spinlock);
             return result;
         }
         
@@ -308,20 +343,29 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                 | ENTRY_WRITABLE
                                 | p_page;
         cm_incref(p_page);
+
+        spinlock_release(&cm_spinlock);
     }
 
     uint32_t entryhi; 
     uint32_t entrylo; 
+    l1_entry_t new_l1_entry = l1_pt->l1_entries[v_l1];
 
-    paddr_t p_page_addr = p_page << 12; // TODO: maybe make a macro for this
+    paddr_t p_page_addr = PAGE_TO_ADDR(p_page);
     pid_t pid = curproc->pid;
     
     entryhi = 0 | fault_page | pid << 6; 
-    entrylo = 0 | p_page_addr | TLBLO_VALID | TLBLO_DIRTY; // TODO: fix this magic number
+
+    if (new_l1_entry & ENTRY_WRITABLE) {
+        entrylo = 0 | p_page_addr | TLBLO_VALID | TLBLO_DIRTY;
+    } else {
+        entrylo = 0 | p_page_addr | TLBLO_VALID;        
+    }
 
     tlb_write(entryhi, entrylo, V_TO_INDEX(fault_page));
 
-    spinlock_release(&lock);
+    lock_release(as->as_lock);
+
     return 0;
 }
 
@@ -365,6 +409,11 @@ free_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2)
     l2_pt->l2_entries[v_l2] = 0; 
 }
 
+/*
+sbrk is almost done. all there is left to do is figure out how to set the inital break
+(which is probably done while loading the elf, maybe in as define region), and to check 
+the fault address values in vm_fault to make sure they are valid.
+*/
 int
 sys_sbrk(size_t amount, int32_t *retval0)
 {

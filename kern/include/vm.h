@@ -30,18 +30,31 @@
 #ifndef _VM_H_
 #define _VM_H_
 
-// TODO: make sure users can't access kernel addresses
-// make sure to set tlb dirty bit as clear to enforce read only
+/*
+TODO: make sure users can't access kernel addresses
+make sure to set tlb dirty bit as clear to enforce read only
 
-// TODO: are my lines too long?
 
-/* 
+TODO: are my lines too long?
+
+ 
 TODO: in AS define region, we may wish to make regions executable or read only, but 
 they may not be allocated in physical memory, thus they are not valid. Thus, we 
 should be able to encode meaning into page table entries that are not valid.
-*/
 
-// TODO: organize where functions are defined
+
+TODO: Get the stack of a user process based on as_define_region (if possible; I'm
+not sure what as_define_region is supposed to do).
+
+
+TODO: organize where functions are defined
+
+
+TODO: forktest almost works, but with 512k, we run out of memory. We may need swap to pass (ask TA)
+Also, we have to check for valid fault address (current, commented out check breaks forktest). We
+must do this to sbrktest (where unallocated heap virtual addresses are passed; we must kill
+the process when this happens).
+*/
 
 
 #include <machine/vm.h>
@@ -137,8 +150,9 @@ corresponding L1 page table is in memory. If the entry is valid, the virtual pag
 of the l1 page table is located on the lowers 20 bits (l1 will occupy a unique page, since it
 is exactly 1 page in size).
 
-Followed by the valid bit is the modify/dirty bit. Then is the reference bit. The following 
-3 bits are the protection bits, namely the readable, writable, exectuable bits.
+(no uses yet): Followed by the valid bit is the modify/dirty bit. Then is the reference bit. 
+
+The following 3 bits are the protection bits, namely the readable, writable, exectuable bits.
 */
 struct l2_pt {
     l2_entry_t l2_entries[NUM_L2PT_ENTRIES];
@@ -151,8 +165,9 @@ entry is a 32 bit integer. The highest bit is the valid bit, indicating if the
 virtual page is mapped to a physical page in memory. If the entry is valid, 
 the physical page number is located on the lowers 20 bits.
 
-Followed by the valid bit is the modify/dirty bit. Then is the reference bit. The following 
-3 bits are the protection bits, namely the readable, writable, exectuable bits.
+(no uses yet): Followed by the valid bit is the modify/dirty bit. Then is the reference bit. 
+
+The following 3 bits are the protection bits, namely the readable, writable, exectuable bits.
 */
 struct l1_pt {
     l1_entry_t l1_entries[NUM_L1PT_ENTRIES];

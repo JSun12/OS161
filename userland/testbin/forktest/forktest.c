@@ -132,7 +132,7 @@ static
 void
 test(int nowait)
 {
-	int pid0, pid1, pid2; //, pid3;
+	int pid0, pid1, pid2, pid3;
 
 	/*
 	 * Caution: This generates processes geometrically.
@@ -149,17 +149,16 @@ test(int nowait)
 	check();
 	pid2 = dofork();
 	putchar('2');
-	// check();
-	// pid3 = dofork();
-	// // putchar('3');
-	// check();
-
+	check();
+	pid3 = dofork();
+	putchar('3');
+	check();
 
 	/*
 	 * These must be called in reverse order to avoid waiting
 	 * improperly.
 	 */
-	// dowait(nowait, pid3);
+	dowait(nowait, pid3);
 	dowait(nowait, pid2);
 	dowait(nowait, pid1);
 	dowait(nowait, pid0);

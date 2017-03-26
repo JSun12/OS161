@@ -67,8 +67,8 @@
  */
 #define PADDR_TO_KVADDR(paddr) ((paddr)+MIPS_KSEG0)
 #define KVADDR_TO_PADDR(paddr) ((paddr)-MIPS_KSEG0)
-#define PAGE_TO_ADDR(page) 	   ((page) << 12) 
-#define ADDR_TO_PAGE(addr) 	   ((addr) >> 12) 
+#define PAGE_TO_ADDR(page) 	   ((page) << 12)
+#define ADDR_TO_PAGE(addr) 	   ((addr) >> 12)
 #define PPAGE_TO_KVPAGE(ppage) ((ppage)+0x00080000)
 #define KVPAGE_TO_PPAGE(ppage) ((ppage)-0x00080000)
 
@@ -122,10 +122,13 @@ paddr_t ram_getfirstfree(void);
  */
 
 struct tlbshootdown {
-	/*
-	 * Change this to what you need for your VM design.
-	 */
-	int ts_placeholder;
+	//NOTE: Are we sure we want to use virtual page #, and physical address
+	// 		I suggest either both virutal & physical page #
+	// 		OR both virutal and physical page address
+	//NOTE: The paddr_t is not needed to do find a page with tlb_probe. Therefore we leave it out
+
+	vaddr_t v_page_num;
+	pid_t pid;
 };
 
 #define TLBSHOOTDOWN_MAX 16

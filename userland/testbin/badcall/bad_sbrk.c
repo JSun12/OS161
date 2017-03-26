@@ -134,4 +134,3 @@ test_sbrk(void)
 	sbrk_unalignedpos();
 	sbrk_unalignedneg();
 }
-

@@ -24,7 +24,7 @@ l1_create(struct l1_pt **l1_pt)
         return ENOMEM;
     }
 
-	KASSERT(((vaddr_t) *l1_pt) % PAGE_SIZE == 0); 
+	KASSERT(((vaddr_t) *l1_pt) % PAGE_SIZE == 0);
 
     for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
         (*l1_pt)->l1_entries[v_l1] = 0;
@@ -53,11 +53,11 @@ as_create(void)
 
 	as->as_lock = lock_create("lock");
 	if (as->as_lock == NULL) {
-		kfree(as); 
+		kfree(as);
 		return NULL;
 	}
 
-	as->l2_pt = kmalloc(sizeof(struct l2_pt)); 
+	as->l2_pt = kmalloc(sizeof(struct l2_pt));
 	if (as->l2_pt == NULL) {
 		lock_destroy(as->as_lock);
 		kfree(as);
@@ -65,8 +65,8 @@ as_create(void)
 	}
 
 	l2_init(as->l2_pt);
-	as->heap_base = 0; 
-	as->stack_top = USERSTACK - STACK_SIZE; // TODO get proper stack 
+	as->heap_base = 0;
+	as->stack_top = USERSTACK - STACK_SIZE; // TODO get proper stack
 	as->brk = 0;
 
 	return as;
@@ -114,6 +114,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 
 	newas->heap_base = old->heap_base;
 	newas->stack_top = old->stack_top;
+    newas->brk = old->brk;
 	*ret = newas;
 
 	lock_release(old->as_lock);
@@ -123,8 +124,8 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 	// TODO: reduce code repetition (similar to as_activate)
 
 	int spl = splhigh();
-	uint32_t entryhi; 
-	uint32_t entrylo; 
+	uint32_t entryhi;
+	uint32_t entrylo;
 	uint32_t index;
 
 	for (index = 0; index < NUM_TLB; index++) {
@@ -141,8 +142,8 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 void
 as_destroy(struct addrspace *as)
 {
-	struct l2_pt *l2_pt = as->l2_pt; 
-	
+	struct l2_pt *l2_pt = as->l2_pt;
+
 	for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
 		l2_entry_t l2_entry = l2_pt->l2_entries[v_l2];
 
@@ -179,7 +180,7 @@ as_destroy(struct addrspace *as)
 	}
 
 	lock_destroy(as->as_lock);
-	kfree(as->l2_pt); 
+	kfree(as->l2_pt);
 	kfree(as);
 }
 
@@ -194,8 +195,8 @@ as_activate(void)
 	}
 
 	int spl = splhigh();
-	uint32_t entryhi; 
-	uint32_t entrylo; 
+	uint32_t entryhi;
+	uint32_t entrylo;
 	uint32_t index;
 
 	for (index = 0; index < NUM_TLB; index++) {
@@ -234,19 +235,19 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 {
 	/*
 	This function is implemented assuming that as_define_region is called
-	by load_elf to allocate space for user program code and static variables. 
+	by load_elf to allocate space for user program code and static variables.
 	Thus, the top of this region should be available for heap. This implementation
-	finds this top. 
-	
+	finds this top.
+
 	TODO: However, there might be more we should do to implement
 	as_define_region properly.
 	*/
-	vaddr_t region_end = vaddr + sz; 
+	vaddr_t region_end = vaddr + sz;
 	if (region_end > as->heap_base) {
 		vaddr_t page_aligned_end = VPAGE_ADDR_MASK & region_end;
 		page_aligned_end += PAGE_SIZE;
 
-		as->heap_base = page_aligned_end; 
+		as->heap_base = page_aligned_end;
 		as->brk = as->heap_base;
 	}
 
@@ -295,4 +296,3 @@ as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 
 	return 0;
 }
-

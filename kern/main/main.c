@@ -112,6 +112,7 @@ boot(void)
 	thread_bootstrap();
 	hardclock_bootstrap();
 	vfs_bootstrap();
+	swap_bootstrap();
 	kheap_nextgeneration();
 
 	/* Probe and initialize devices. Interrupts should come on. */

@@ -1,20 +1,39 @@
 #include <types.h>
+#include <kern/errno.h>
 #include <spinlock.h>
 #include <vm.h>
 #include <current.h>
 #include <signal.h>
+#include <spl.h>
 #include <proc.h>
 #include <addrspace.h>
 #include <lib.h>
 #include <mips/tlb.h>
-#include <kern/errno.h>
+#include <vfs.h>
+#include <kern/fcntl.h>
+#include <vnode.h>
 
 
 struct coremap *cm;
 struct spinlock cm_spinlock = SPINLOCK_INITIALIZER;
 
+// TODO: probs need to change for tlb shootdown
+// struct spinlock tlb_spinlock = SPINLOCK_INITIALIZER;
+
 static p_page_t first_alloc_page; /* First physical page that can be dynamically allocated */
 static p_page_t last_page; /* One page past the last free physical page in RAM */
+
+// TODO: maybe this couting policy is ugly. If it works, clean it up by using proper types, etc.
+struct vnode *swap_disk;
+const char *swap_dir = "lhd0raw:";
+
+struct spinlock counter_spinlock = SPINLOCK_INITIALIZER;
+volatile int swap_out_counter = 0;
+
+#define SWAP_OUT_COUNT    10
+#define NUM_FREE_PPAGES   12
+
+
 
 static
 void
@@ -93,7 +112,7 @@ cm_decref(p_page_t p_page)
 void
 vm_bootstrap()
 {
-    paddr_t cm_paddr = ram_stealmem(COREMAP_PAGES);
+    paddr_t cm_paddr = ram_stealmem(2*COREMAP_PAGES);
     KASSERT(cm_paddr != 0);
 
     cm = (struct coremap *) PADDR_TO_KVADDR(cm_paddr);
@@ -106,6 +125,13 @@ vm_bootstrap()
     for (p_page_t p_page = 0; p_page < pages_used; p_page++) {
         kalloc_ppage(p_page);
     }
+}
+
+void
+swap_bootstrap()
+{
+    // TODO: this is probably not appropriate
+    vfs_open((char *) swap_dir, O_RDWR, 0, &swap_disk);
 }
 
 vaddr_t
@@ -195,6 +221,11 @@ vm_tlbshootdown(const struct tlbshootdown *tlbsd)
 
 }
 
+void
+swap_out()
+{
+
+}
 
 /*
 (Pasindu's thoughts; don't worry if this is gibberish):
@@ -208,6 +239,17 @@ if not specified (that is, valid), assume readable and writable.
 int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
+    spinlock_acquire(&counter_spinlock);
+
+    if (swap_out_counter == SWAP_OUT_COUNT - 1) {
+        swap_out_counter = 0;
+        spinlock_release(&counter_spinlock);
+        swap_out();
+    } else {
+        swap_out_counter++;
+        spinlock_release(&counter_spinlock);
+    }
+
     struct addrspace *as = curproc->p_addrspace;
 
     // TODO: do a proper address check (make sure kernel addresses aren't called)
@@ -239,7 +281,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             if (cm_getref(p_page) > 1) {
                 result = l1_create(&l1_pt);
                 if (result) {
-
                     spinlock_release(&cm_spinlock);
                     return result;
                 }
@@ -371,7 +412,11 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         entrylo = 0 | p_page_addr | TLBLO_VALID;
     }
 
+    int spl = splhigh();
+
     tlb_write(entryhi, entrylo, V_TO_INDEX(fault_page));
+
+    splx(spl);
 
     lock_release(as->as_lock);
 

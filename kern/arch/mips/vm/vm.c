@@ -188,7 +188,7 @@ vm_tlbshootdown(const struct tlbshootdown *tlbsd)
     vaddr_t v_page = tlbsd->v_page_num;
     pid_t pid = tlbsd->pid;
     uint32_t entryhi = 0 | (v_page & PAGE_FRAME) | pid << 6;
-    uint32_t index = tlb_probe(entryhi, 0);
+    int32_t index = tlb_probe(entryhi, 0);
 
     if (index > -1)
         tlb_write(TLBHI_INVALID(index), TLBLO_INVALID(), index);

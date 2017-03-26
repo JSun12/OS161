@@ -56,6 +56,7 @@ int semtest(int, char **);
 int locktest(int, char **);
 int cvtest(int, char **);
 int cvtest2(int, char **);
+int speciallocktest(int, char **);
 
 /* filesystem tests */
 int fstest(int, char **);

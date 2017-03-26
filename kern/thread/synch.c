@@ -201,6 +201,25 @@ lock_acquire(struct lock *lock)
     spinlock_release(&lock->lk_lock);
 }
 
+bool
+lock_acquire_if_not_held(struct lock *lock)
+{
+    KASSERT(lock != NULL);
+	KASSERT(curthread->t_in_interrupt == false);
+    spinlock_acquire(&lock->lk_lock);
+
+    if (lock->lk_flag == true) {
+        spinlock_release(&lock->lk_lock);
+        return false;
+    }
+
+    lock->lk_flag = true;
+    lock->lk_thread = curthread;
+    spinlock_release(&lock->lk_lock);
+    
+    return true;
+}
+
 void
 lock_release(struct lock *lock)
 {

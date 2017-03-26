@@ -101,6 +101,7 @@ void lock_destroy(struct lock *);
  */
 void lock_acquire(struct lock *);
 void lock_release(struct lock *);
+bool lock_acquire_if_not_held(struct lock *);
 bool lock_do_i_hold(struct lock *);
 
 

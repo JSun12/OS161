@@ -399,3 +399,28 @@ cvtest2(int nargs, char **args)
 	kprintf("cvtest2 done\n");
 	return 0;
 }
+
+int
+speciallocktest(int nargs, char **args)
+{
+	(void)nargs; 
+	(void)args;
+
+	struct lock *lock = lock_create("lock");
+	lock_acquire(lock);
+
+	if (lock_acquire_if_not_held(lock)) {
+		panic("lock acquired although held\n");
+	}
+
+	lock_release(lock);
+
+	if (!(lock_acquire_if_not_held(lock))) {
+		panic("lock should've become held");
+	}
+
+	lock_release(lock);
+	
+	kprintf("speciallocktest done\n");
+	return 0;
+}

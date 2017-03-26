@@ -74,11 +74,9 @@ processors.
 
 #define PP_USED              0x80000000    /* Bit indicating if physical page unused */
 #define KMALLOC_END          0x40000000    /* Bit indicating the last page of a kmalloc; used for kfree */
-#define COPY_TO_WRITE        0x20000000    
 #define REF_COUNT            0x00fc0000    // TODO: maybe we need the pid number
 #define GET_REF(entry)       (((entry) & REF_COUNT) >> 20)
-#define SET_REF(entry, ref)  ((entry) = ((entry) & (~REF_COUNT)) | ((ref) << 20))
-// #define CM_PID(pid)          ((pid) << 20)
+#define SET_REF(entry, ref)  ((entry) = ((entry) & (~REF_COUNT)) | (((ref) & 0x0000003f) << 20))
 
 #define NUM_L2PT_ENTRIES     PAGE_SIZE/4
 #define NUM_L1PT_ENTRIES     PAGE_SIZE/4
@@ -144,6 +142,7 @@ Reference counts are modified in vm_fault, in as_copy, as_destroy.
 */
 struct coremap {
     cm_entry_t cm_entries[NUM_PPAGES];
+    pids8_t pids8_entries[NUM_PPAGES];
 };
 
 
@@ -185,10 +184,13 @@ void free_l1_pt(struct l2_pt *, v_page_l2_t);
 size_t cm_getref(p_page_t);
 void cm_incref(p_page_t);
 void cm_decref(p_page_t);
-void copy_to_write_set(p_page_t);
 
 /* Initialization function */
 void vm_bootstrap(void);
+void swap_bootstrap(void);
+
+/* Swapping */
+void swap_out(void);
 
 /* Fault handling function called by trap code */
 int vm_fault(int, vaddr_t);

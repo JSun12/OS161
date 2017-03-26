@@ -172,13 +172,17 @@ as_destroy(struct addrspace *as)
 				}
 			}
 
-			spinlock_acquire(&cm_spinlock);
-			size_t refs = cm_getref(KVPAGE_TO_PPAGE(v_page_l1)) == 1;
-			spinlock_release(&cm_spinlock);
+			p_page_t p_page = KVPAGE_TO_PPAGE(v_page_l1);
 
-			if (refs == 1) {
+			spinlock_acquire(&cm_spinlock);
+
+			if (cm_getref(p_page) > 1) {
+				cm_decref(p_page);
+			} else {
 				kfree(l1_pt);
 			}
+
+			spinlock_release(&cm_spinlock);
 		}
 	}
 

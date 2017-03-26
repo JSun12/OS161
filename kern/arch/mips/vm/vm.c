@@ -16,6 +16,7 @@
 
 struct coremap *cm;
 struct spinlock cm_spinlock = SPINLOCK_INITIALIZER;
+volatile int cm_counter; 
 
 // TODO: probs need to change for tlb shootdown
 // struct spinlock tlb_spinlock = SPINLOCK_INITIALIZER;
@@ -30,7 +31,7 @@ const char *swap_dir = "lhd0raw:";
 static struct spinlock counter_spinlock = SPINLOCK_INITIALIZER;
 static volatile int swap_out_counter = 0;
 
-#define SWAP_OUT_COUNT    4
+#define SWAP_OUT_COUNT    200
 #define NUM_FREE_PPAGES   8
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -41,6 +42,7 @@ kalloc_ppage(p_page_t p_page)
 {
     v_page_t v_page = PPAGE_TO_KVPAGE(p_page);
     cm->cm_entries[p_page] = 0 | PP_USED | v_page;
+    cm_counter++;
 }
 
 static
@@ -86,6 +88,7 @@ free_ppage(p_page_t p_page)
     KASSERT(first_alloc_page <= p_page && p_page < last_page);
 
     cm->cm_entries[p_page] = 0;
+    cm_counter--;
 }
 
 size_t
@@ -117,21 +120,21 @@ cm_decref(p_page_t p_page)
 }
 
 // TODO: too many magic numbers?
-// static
-// void 
-// set_pid8(p_page_t p_page, pid_t pid, int pos)
-// {
-//     KASSERT(0 <= pos && pos < 4);
-//     KASSERT(first_alloc_page <= p_page && p_page < last_page);
+static
+void 
+set_pid8(p_page_t p_page, pid_t pid, int pos)
+{
+    KASSERT(0 <= pos && pos < 4);
+    KASSERT(first_alloc_page <= p_page && p_page < last_page);
 
-//     pid_t pid_to_add = 0;
+    pid_t pid_to_add = 0;
 
-//     if (pid < 256) {
-//         pid_to_add = pid; 
-//     }
+    if (pid < 256) {
+        pid_to_add = pid; 
+    }
 
-//     cm->pids8_entries[p_page] = 0 | (pid_to_add << pos*8);
-// }
+    cm->pids8_entries[p_page] = 0 | (pid_to_add << pos*8);
+}
 
 ////////////////////////////////////////////////////////////////////////////////////
 
@@ -207,7 +210,7 @@ free_kpages(vaddr_t addr)
 
     while (p_page_used(curr)) {
         end = cm->cm_entries[curr] & KMALLOC_END;
-        cm->cm_entries[curr] = 0x00000000;
+        free_ppage(curr);
         if (end) {
             if (!acquired) {
                 spinlock_release(&cm_spinlock);
@@ -243,9 +246,9 @@ vm_tlbshootdown(const struct tlbshootdown *tlbsd)
     uint32_t entryhi = 0 | (v_page & PAGE_FRAME) | pid << 6;
     int32_t index = tlb_probe(entryhi, 0);
 
-    if (index > -1)
+    if (index > -1) {
         tlb_write(TLBHI_INVALID(index), TLBLO_INVALID(), index);
-
+    }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////
@@ -253,7 +256,9 @@ vm_tlbshootdown(const struct tlbshootdown *tlbsd)
 void
 swap_out()
 {
-
+    spinlock_acquire(&cm_spinlock);
+    // kprintf("Pages used: %x\n", cm_counter);
+    spinlock_release(&cm_spinlock);
 }
 
 /*
@@ -314,6 +319,9 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                     return result;
                 }
 
+                p_page_t new_p_page = ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt));
+                set_pid8(new_p_page, curproc->pid, 0);
+
                 struct l1_pt *l1_pt_orig = (struct l1_pt *) PAGE_TO_ADDR(v_page);
                 for (v_page_l1_t l1_val = 0; l1_val < NUM_L1PT_ENTRIES; l1_val++) {
                     l1_pt->l1_entries[l1_val] = l1_pt_orig->l1_entries[l1_val];
@@ -325,7 +333,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                         | ENTRY_WRITABLE
                                         | ADDR_TO_PAGE((vaddr_t) l1_pt);
 
-                cm_incref(ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt)));
+                cm_incref(new_p_page);
                 cm_decref(p_page);
             } else {
                 l2_pt->l2_entries[v_l2] = l2_pt->l2_entries[v_l2] | ENTRY_WRITABLE;
@@ -352,6 +360,8 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                 | ENTRY_WRITABLE
                                 | v_page;
 
+        p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
+        set_pid8(p_page, curproc->pid, 0);
         cm_incref(KVPAGE_TO_PPAGE(v_page));
 
         spinlock_release(&cm_spinlock);
@@ -376,9 +386,12 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                     return result;
                 }
 
+                cm_counter++;
                 cm->cm_entries[p_page] = 0
                                        | PP_USED
                                        | ADDR_TO_PAGE(fault_page);
+
+                set_pid8(p_page, curproc->pid, 0);
 
                 cm_incref(p_page);
                 cm_decref(old_page);
@@ -412,9 +425,12 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             return result;
         }
 
+        cm_counter++;       
         cm->cm_entries[p_page] = 0
                                 | PP_USED
                                 | ADDR_TO_PAGE(fault_page);
+                                
+        set_pid8(p_page, curproc->pid, 0);       
 
         l1_pt->l1_entries[v_l1] = 0
                                 | ENTRY_VALID
@@ -470,11 +486,15 @@ free_vpage(struct l2_pt *l2_pt, v_page_t v_page)
     if (l1_entry & ENTRY_VALID) {
         p_page_t p_page = l1_entry & PAGE_MASK;
 
+        spinlock_acquire(&cm_spinlock);
+
         if (cm_getref(p_page) > 1) {
             cm_decref(p_page);
         } else {
             free_ppage(p_page);
         }
+
+        spinlock_release(&cm_spinlock);
     }
 }
 
@@ -484,12 +504,16 @@ free_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2)
     v_page_t v_page = l2_pt->l2_entries[v_l2] & PAGE_MASK;
     p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
 
+    spinlock_acquire(&cm_spinlock);
+
     if (cm_getref(p_page) > 1) {
         cm_decref(p_page);
     } else {
         struct l1_pt *l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);
         kfree(l1_pt);
     }
+
+    spinlock_release(&cm_spinlock);
 
     l2_pt->l2_entries[v_l2] = 0;
 }
@@ -507,18 +531,23 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
     }
     struct addrspace *as = curproc->p_addrspace;
 
+    lock_acquire(as->as_lock);   
+
     vaddr_t old_heap_end = as->brk;
     vaddr_t new_heap_end = old_heap_end + amount;
     if (new_heap_end < as->heap_base) {
+        lock_release(as->as_lock);
         return EINVAL;
     }
 
     int64_t overflow = (int64_t)old_heap_end + (int64_t)amount;
     if (overflow > USERSPACETOP || overflow < 0){
+        lock_release(as->as_lock);
         return EINVAL;
     }
 
     if (new_heap_end > as->stack_top) {
+        lock_release(as->as_lock);
         return ENOMEM;
     }
 
@@ -561,5 +590,8 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
 
     *retval0 = old_heap_end;
     as->brk = new_heap_end;
+
+    lock_release(as->as_lock);
+    
     return 0;
 }

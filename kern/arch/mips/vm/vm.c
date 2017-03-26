@@ -27,13 +27,13 @@ static p_page_t last_page; /* One page past the last free physical page in RAM *
 struct vnode *swap_disk;
 const char *swap_dir = "lhd0raw:";
 
-struct spinlock counter_spinlock = SPINLOCK_INITIALIZER;
-volatile int swap_out_counter = 0;
+static struct spinlock counter_spinlock = SPINLOCK_INITIALIZER;
+static volatile int swap_out_counter = 0;
 
-#define SWAP_OUT_COUNT    10
-#define NUM_FREE_PPAGES   12
+#define SWAP_OUT_COUNT    4
+#define NUM_FREE_PPAGES   8
 
-
+/////////////////////////////////////////////////////////////////////////////////////////
 
 static
 void
@@ -84,18 +84,23 @@ void
 free_ppage(p_page_t p_page) 
 {
     KASSERT(first_alloc_page <= p_page && p_page < last_page);
+
     cm->cm_entries[p_page] = 0; 
 }
 
 size_t
 cm_getref(p_page_t p_page)
 {
+    KASSERT(first_alloc_page <= p_page && p_page < last_page); 
+
     return GET_REF(cm->cm_entries[p_page]);
 }
 
 void
 cm_incref(p_page_t p_page)
 {
+    KASSERT(first_alloc_page <= p_page && p_page < last_page);
+
     size_t curref = GET_REF(cm->cm_entries[p_page]);
     curref++;
     SET_REF(cm->cm_entries[p_page], curref);
@@ -104,10 +109,31 @@ cm_incref(p_page_t p_page)
 void
 cm_decref(p_page_t p_page)
 {
+    KASSERT(first_alloc_page <= p_page && p_page < last_page);
+
     size_t curref = GET_REF(cm->cm_entries[p_page]);
     curref--;
     SET_REF(cm->cm_entries[p_page], curref);
 }
+
+// TODO: too many magic numbers?
+// static
+// void 
+// set_pid8(p_page_t p_page, pid_t pid, int pos)
+// {
+//     KASSERT(0 <= pos && pos < 4);
+//     KASSERT(first_alloc_page <= p_page && p_page < last_page);
+
+//     pid_t pid_to_add = 0;
+
+//     if (pid < 256) {
+//         pid_to_add = pid; 
+//     }
+
+//     cm->pids8_entries[p_page] = 0 | (pid_to_add << pos*8);
+// }
+
+////////////////////////////////////////////////////////////////////////////////////
 
 void 
 vm_bootstrap()
@@ -196,7 +222,7 @@ free_kpages(vaddr_t addr)
     }
 }
 
-
+//////////////////////////////////////////////////////////////////////////////////////////
 
 void 
 vm_tlbshootdown_all()
@@ -211,6 +237,8 @@ vm_tlbshootdown(const struct tlbshootdown *tlbsd)
 {
     (void) tlbsd;
 }
+
+/////////////////////////////////////////////////////////////////////////////////////////////
 
 void
 swap_out()
@@ -392,15 +420,15 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     uint32_t entrylo; 
     l1_entry_t new_l1_entry = l1_pt->l1_entries[v_l1];
 
-    paddr_t p_page_addr = PAGE_TO_ADDR(p_page);
+    p_page_t p_page_high = p_page << 12;
     pid_t pid = curproc->pid;
     
     entryhi = 0 | fault_page | pid << 6; 
 
     if (new_l1_entry & ENTRY_WRITABLE) {
-        entrylo = 0 | p_page_addr | TLBLO_VALID | TLBLO_DIRTY;
+        entrylo = 0 | p_page_high | TLBLO_VALID | TLBLO_DIRTY;
     } else {
-        entrylo = 0 | p_page_addr | TLBLO_VALID;        
+        entrylo = 0 | p_page_high | TLBLO_VALID;        
     }
 
     int spl = splhigh();
@@ -413,6 +441,8 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     return 0;
 }
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
 
 void
 free_vpage(struct l2_pt *l2_pt, v_page_t v_page)

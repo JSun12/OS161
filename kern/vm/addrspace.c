@@ -101,11 +101,14 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 
 			for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
 				l1_pt_old->l1_entries[v_l1] = l1_pt_old->l1_entries[v_l1] & (~ENTRY_WRITABLE);
-				p_page_t p_page = l1_pt_old->l1_entries[v_l1] & PAGE_MASK;
 
-				spinlock_acquire(&cm_spinlock);
-				cm_incref(p_page);
-				spinlock_release(&cm_spinlock);
+				if (l1_pt_old->l1_entries[v_l1] & ENTRY_VALID) {
+					p_page_t p_page = l1_pt_old->l1_entries[v_l1] & PAGE_MASK;
+
+					spinlock_acquire(&cm_spinlock);
+					cm_incref(p_page);
+					spinlock_release(&cm_spinlock);
+				}
 			}
 		}
 

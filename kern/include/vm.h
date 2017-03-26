@@ -78,6 +78,11 @@ processors.
 #define GET_REF(entry)       (((entry) & REF_COUNT) >> 20)
 #define SET_REF(entry, ref)  ((entry) = ((entry) & (~REF_COUNT)) | (((ref) & 0x0000003f) << 20))
 
+#define PID8_1               0x000000ff
+#define PID8_2               0x0000ff00
+#define PID8_3               0x00ff0000
+#define PID8_4               0xff000000
+
 #define NUM_L2PT_ENTRIES     PAGE_SIZE/4
 #define NUM_L1PT_ENTRIES     PAGE_SIZE/4
 

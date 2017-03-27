@@ -126,6 +126,7 @@ int               as_define_stack(struct addrspace *as, vaddr_t *initstackptr);
 
 int               l1_create(struct l1_pt **l1_pt);
 void              l2_init(struct l2_pt *l2_pt);
+void              tlb_invalidate(void);
 
 /*
  * Functions in loadelf.c

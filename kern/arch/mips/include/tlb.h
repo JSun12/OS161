@@ -100,7 +100,7 @@ int tlb_probe(uint32_t entryhi, uint32_t entrylo);
 We determine the 6 bit tlb index by consider the 4 LSBs
 and 2 MSBs of the address virtual page number.
 */
-#define V_TO_INDEX(vaddr)      ((((vaddr) & 0x60000000) >> 25) | (((vaddr) & 0x0000f000) >> 12))
+#define V_TO_INDEX(vaddr)      ((((vaddr) & 0x60000000) >> 25) | (((vaddr) & 0x00003000) >> 12) | (((vaddr) & 0x00030000) >> 14))
 
 /*
  * Number of TLB entries in the processor.

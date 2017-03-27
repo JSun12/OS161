@@ -13,6 +13,8 @@
  * used. The cheesy hack versions in dumbvm.c are used instead.
  */
 
+extern struct spinlock global;
+
 extern struct cm *cm;
 extern struct spinlock cm_spinlock;
 
@@ -82,6 +84,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 		return ENOMEM;
 	}
 
+	spinlock_acquire(&global);
 	lock_acquire(old->as_lock);
 
 	struct l2_pt *l2_pt_new = newas->l2_pt;
@@ -121,6 +124,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 	*ret = newas;
 
 	lock_release(old->as_lock);
+	spinlock_release(&global);
 
 	// TODO: change the dirty bits of the correct process, not just invalidate all tlb entries
 
@@ -145,6 +149,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 void
 as_destroy(struct addrspace *as)
 {
+	spinlock_acquire(&global);
 	struct l2_pt *l2_pt = as->l2_pt;
 
 	for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
@@ -189,6 +194,8 @@ as_destroy(struct addrspace *as)
 	lock_destroy(as->as_lock);
 	kfree(as->l2_pt);
 	kfree(as);
+
+	spinlock_release(&global);
 }
 
 void

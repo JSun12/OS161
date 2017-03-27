@@ -13,10 +13,11 @@
 #include <kern/fcntl.h>
 #include <vnode.h>
 
+struct spinlock global = SPINLOCK_INITIALIZER;
 
 struct coremap *cm;
 struct spinlock cm_spinlock = SPINLOCK_INITIALIZER;
-volatile int cm_counter; 
+volatile size_t cm_counter = 0; 
 
 // TODO: probs need to change for tlb shootdown
 // struct spinlock tlb_spinlock = SPINLOCK_INITIALIZER;
@@ -30,8 +31,9 @@ const char *swap_dir = "lhd0raw:";
 
 static struct spinlock counter_spinlock = SPINLOCK_INITIALIZER;
 static volatile int swap_out_counter = 0;
+static volatile p_page_t swap_clock;
 
-#define SWAP_OUT_COUNT    200
+#define SWAP_OUT_COUNT    5000
 #define NUM_FREE_PPAGES   8
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -148,6 +150,7 @@ vm_bootstrap()
 
     KASSERT(ram_stealmem(0) % PAGE_SIZE == 0);
     first_alloc_page = ADDR_TO_PAGE(ram_stealmem(0));
+    swap_clock = first_alloc_page;
     last_page = ADDR_TO_PAGE(ram_getsize());
 
     size_t pages_used = first_alloc_page;
@@ -252,13 +255,37 @@ vm_tlbshootdown(const struct tlbshootdown *tlbsd)
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////
+// static
+// p_page_t
+// next_clock_val(p_page_t prev_clock) 
+// {
+//     KASSERT(first_alloc_page <= prev_clock && prev_clock < last_page);
 
-void
+//     if (prev_clock == last_page - 1) {
+//         return first_alloc_page;
+//     } else {
+//         return prev_clock++;
+//     }
+// }
+
+
+int
 swap_out()
 {
     spinlock_acquire(&cm_spinlock);
-    // kprintf("Pages used: %x\n", cm_counter);
+    kprintf("Pages used: %x\n", cm_counter);
     spinlock_release(&cm_spinlock);
+
+    // size_t free_pages = last_page - cm_counter;
+    // p_page_t first_clock = swap_clock;
+
+    // if (free_pages < NUM_FREE_PPAGES) {
+    //     do {
+            
+    //     } while (swap_clock != first_clock);
+    // }
+
+    return 0;
 }
 
 /*
@@ -285,9 +312,10 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     }
 
     struct addrspace *as = curproc->p_addrspace;
-
+    spinlock_acquire(&global);
     // TODO: do a proper address check (make sure kernel addresses aren't called)
     if (as->brk <= faultaddress && faultaddress < as->stack_top) {
+        spinlock_release(&global);
         return SIGSEGV;
     }
 
@@ -316,6 +344,8 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 result = l1_create(&l1_pt);
                 if (result) {
                     spinlock_release(&cm_spinlock);
+                    lock_release(as->as_lock);
+                    spinlock_release(&global);
                     return result;
                 }
 
@@ -348,6 +378,8 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     } else {
         result = l1_create(&l1_pt);
         if (result) {
+            lock_release(as->as_lock);
+            spinlock_release(&global);
             return result;
         }
 
@@ -383,6 +415,8 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 result = find_free(1, &p_page);
                 if (result) {
                     spinlock_release(&cm_spinlock);
+                    lock_release(as->as_lock);
+                    spinlock_release(&global);
                     return result;
                 }
 
@@ -422,6 +456,8 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         result = find_free(1, &p_page);
         if (result) {
             spinlock_release(&cm_spinlock);
+            lock_release(as->as_lock);
+            spinlock_release(&global);
             return result;
         }
 
@@ -464,7 +500,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     splx(spl);
 
     lock_release(as->as_lock);
-
+    spinlock_release(&global);
     return 0;
 }
 

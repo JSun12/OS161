@@ -195,7 +195,7 @@ void vm_bootstrap(void);
 void swap_bootstrap(void);
 
 /* Swapping */
-void swap_out(void);
+int swap_out(void);
 
 /* Fault handling function called by trap code */
 int vm_fault(int, vaddr_t);

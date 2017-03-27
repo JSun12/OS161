@@ -29,7 +29,7 @@ static p_page_t last_page; /* One page past the last free physical page in RAM *
 struct vnode *swap_disk;
 const char *swap_dir = "lhd0raw:";
 
-static struct spinlock counter_spinlock = SPINLOCK_INITIALIZER;
+//static struct spinlock counter_spinlock = SPINLOCK_INITIALIZER;
 static volatile int swap_out_counter = 1;
 static volatile p_page_t swap_clock;
 

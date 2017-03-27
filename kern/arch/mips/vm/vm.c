@@ -17,7 +17,7 @@ struct spinlock global = SPINLOCK_INITIALIZER;
 
 struct coremap *cm;
 struct spinlock cm_spinlock = SPINLOCK_INITIALIZER;
-volatile size_t cm_counter = 0; 
+volatile size_t cm_counter = 0;
 
 // TODO: probs need to change for tlb shootdown
 // struct spinlock tlb_spinlock = SPINLOCK_INITIALIZER;
@@ -96,7 +96,7 @@ free_ppage(p_page_t p_page)
 size_t
 cm_getref(p_page_t p_page)
 {
-    KASSERT(first_alloc_page <= p_page && p_page < last_page); 
+    KASSERT(first_alloc_page <= p_page && p_page < last_page);
 
     return GET_REF(cm->cm_entries[p_page]);
 }
@@ -123,7 +123,7 @@ cm_decref(p_page_t p_page)
 
 // TODO: too many magic numbers?
 static
-void 
+void
 set_pid8(p_page_t p_page, pid_t pid, int pos)
 {
     KASSERT(0 <= pos && pos < 4);
@@ -132,7 +132,7 @@ set_pid8(p_page_t p_page, pid_t pid, int pos)
     pid_t pid_to_add = 0;
 
     if (pid < 256) {
-        pid_to_add = pid; 
+        pid_to_add = pid;
     }
 
     cm->pids8_entries[p_page] = 0 | (pid_to_add << pos*8);
@@ -257,7 +257,7 @@ vm_tlbshootdown(const struct tlbshootdown *tlbsd)
 /////////////////////////////////////////////////////////////////////////////////////////////
 // static
 // p_page_t
-// next_clock_val(p_page_t prev_clock) 
+// next_clock_val(p_page_t prev_clock)
 // {
 //     KASSERT(first_alloc_page <= prev_clock && prev_clock < last_page);
 
@@ -273,7 +273,7 @@ int
 swap_out()
 {
     spinlock_acquire(&cm_spinlock);
-    kprintf("Pages used: %x\n", cm_counter);
+    kprintf("\nPages used: %x\n ", cm_counter);
     spinlock_release(&cm_spinlock);
 
     // size_t free_pages = last_page - cm_counter;
@@ -281,7 +281,7 @@ swap_out()
 
     // if (free_pages < NUM_FREE_PPAGES) {
     //     do {
-            
+
     //     } while (swap_clock != first_clock);
     // }
 
@@ -306,6 +306,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         swap_out_counter = 0;
         spinlock_release(&counter_spinlock);
         swap_out();
+        kprintf(" Swap Fault Address: %x\n", faultaddress);
     } else {
         swap_out_counter++;
         spinlock_release(&counter_spinlock);
@@ -461,12 +462,12 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             return result;
         }
 
-        cm_counter++;       
+        cm_counter++;
         cm->cm_entries[p_page] = 0
                                 | PP_USED
                                 | ADDR_TO_PAGE(fault_page);
-                                
-        set_pid8(p_page, curproc->pid, 0);       
+
+        set_pid8(p_page, curproc->pid, 0);
 
         l1_pt->l1_entries[v_l1] = 0
                                 | ENTRY_VALID
@@ -490,7 +491,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     if (new_l1_entry & ENTRY_WRITABLE) {
         entrylo = 0 | p_page_high | TLBLO_VALID | TLBLO_DIRTY;
     } else {
-        entrylo = 0 | p_page_high | TLBLO_VALID;        
+        entrylo = 0 | p_page_high | TLBLO_VALID;
     }
 
     int spl = splhigh();
@@ -574,8 +575,9 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
     struct addrspace *as = curproc->p_addrspace;
     spinlock_acquire(&global);
 
-    lock_acquire(as->as_lock);   
+    lock_acquire(as->as_lock);
 
+    vaddr_t stack_top = as->stack_top;
     vaddr_t old_heap_end = as->brk;
     vaddr_t new_heap_end = old_heap_end + amount;
     if (new_heap_end < as->heap_base) {
@@ -591,7 +593,7 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
         return EINVAL;
     }
 
-    if (new_heap_end > as->stack_top) {
+    if (new_heap_end > stack_top) {
         lock_release(as->as_lock);
         spinlock_release(&global);
         return ENOMEM;
@@ -605,6 +607,8 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
         v_page_l1_t new_l1 = L1_PNUM(new_heap_end);
         struct l2_pt *l2_pt = as->l2_pt;
 
+        //NOTE: This could likely be changed to a single for loop that goes once is oldl2 == newl2
+        // Also, check to make sure we want < and not <=
         if (old_l2 == new_l2) {
             for (v_page_l1_t v_l1 = new_l1; v_l1 < old_l1; v_l1++) {
                 v_page_t v_page = PNUM_TO_PAGE(new_l2, v_l1);
@@ -632,13 +636,111 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
                 free_vpage(l2_pt, v_page);
             }
         }
+        *retval0 = old_heap_end;
+        as->brk = new_heap_end;
     }
+    // Check to see if we have enough memory
+    if (new_heap_end > old_heap_end){
+        // TODO: Increase code reuse between this and the above case
+        v_page_l2_t old_l2 = L2_PNUM(old_heap_end);
+        v_page_l1_t old_l1 = L1_PNUM(old_heap_end);
+        v_page_l2_t new_l2 = L2_PNUM(new_heap_end);
+        v_page_l1_t new_l1 = L1_PNUM(new_heap_end);
 
+        int num_used = 0;
+        if (old_l2 == new_l2){
+            num_used += (new_l1 - old_l1);
+        } else {
+            num_used += (new_l2 - old_l2 - 1) * NUM_L1PT_ENTRIES;
+            num_used += NUM_L1PT_ENTRIES - old_l1;
+            num_used += new_l1;
+        }
+        if (num_used > NUM_PPAGES){
+            *retval0 = -1;
+            lock_release(as->as_lock);
+            spinlock_release(&global);
+            return ENOMEM;
+        }
+
+        //XXX: Am I dealing with the first old_l2 / old_l1 correctly? Heap_end is not allocated Im assuming...?
+        vaddr_t cur_vaddr = old_heap_end;
+
+        if (old_l2 == new_l2) {
+            for (v_page_l1_t v_l1 = old_l1; v_l1 < new_l1; v_l1++) {
+                v_page_l2_t v_l2 = old_l2;
+
+                int result;
+                struct l1_pt *l1_pt;
+                struct l2_pt *l2_pt = as->l2_pt;
+
+                spinlock_acquire(&cm_spinlock);
+
+                //XXX: sbrk doesnt return result. I just copied this code from vm_fault
+                result = l1_create(&l1_pt);
+                if (result) {
+                    spinlock_release(&cm_spinlock);
+                    lock_release(as->as_lock);
+                    spinlock_release(&global);
+                    return result;
+                }
+
+                p_page_t new_p_page = ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt));
+                set_pid8(new_p_page, curproc->pid, 0);
+
+                l2_pt->l2_entries[v_l2] = 0
+                                        | ENTRY_VALID
+                                        | ENTRY_READABLE
+                                        | ENTRY_WRITABLE
+                                        | ADDR_TO_PAGE((vaddr_t) l1_pt);
+
+                cm_incref(new_p_page);
+
+                // Now populate the l1 page
+
+                spinlock_release(&cm_spinlock);
+
+
+
+                cur_vaddr += PAGE_SIZE;
+            }
+        } else {
+            // Fill up old_l2's l1 table
+            for (v_page_l1_t v_l1 = old_l1; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
+
+            }
+            // Check to see if we need to completely fill any l2 tables with blank entries
+            if (new_l2 - old_l2 > 1){
+                for (v_page_l2_t v_l2 = old_l2 + 1 ; v_l2 < new_l2; v_l2++) {
+                    for (v_page_l1_t v_l1 = old_l1; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
+
+                    }
+                }
+            }
+
+            // Fill the last l2 table up to new_l1
+            for (v_page_l1_t v_l1 = 0; v_l1 < new_l1; v_l1++) {
+
+            }
+        }
+        /*
+        if (stack_l2 == new_l2){
+            for (v_page_l1_t v_l1 = old_l1; v_l1 < new_l1; v_l1++) {
+                v_page_t v_page = PNUM_TO_PAGE(new_l2, v_l1);
+                free_vpage(l2_pt, v_page);
+            }
+        }
+        else if (stack_l1 < new_l1){
+            // Code this
+        }
+
+        result = l1_create(&l1_pt);
+        */
+    }
     *retval0 = old_heap_end;
     as->brk = new_heap_end;
 
     lock_release(as->as_lock);
     spinlock_release(&global);
-    
+
     return 0;
 }

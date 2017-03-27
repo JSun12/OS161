@@ -43,6 +43,23 @@ l2_init(struct l2_pt *l2_pt)
 	}
 }
 
+void
+tlb_invalidate() {
+	int spl = splhigh();
+	uint32_t entryhi;
+	uint32_t entrylo;
+	uint32_t index;
+
+	for (index = 0; index < NUM_TLB; index++) {
+		tlb_read(&entryhi, &entrylo, index);
+		// entrylo = entrylo & (~TLB_VALID_BIT);
+		entrylo = 0;
+		tlb_write(entryhi, entrylo, index);
+	}
+
+	splx(spl);
+}
+
 struct addrspace *
 as_create(void)
 {
@@ -85,7 +102,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 	}
 
 	spinlock_acquire(&global);
-	lock_acquire(old->as_lock);
+	// lock_acquire(old->as_lock);
 
 	struct l2_pt *l2_pt_new = newas->l2_pt;
 	struct l2_pt *l2_pt_old = old->l2_pt;
@@ -123,26 +140,15 @@ as_copy(struct addrspace *old, struct addrspace **ret)
     newas->brk = old->brk;
 	*ret = newas;
 
-	lock_release(old->as_lock);
-	spinlock_release(&global);
+	// lock_release(old->as_lock);
 
 	// TODO: change the dirty bits of the correct process, not just invalidate all tlb entries
 
 	// TODO: reduce code repetition (similar to as_activate)
 
-	int spl = splhigh();
-	uint32_t entryhi;
-	uint32_t entrylo;
-	uint32_t index;
+	tlb_invalidate();
 
-	for (index = 0; index < NUM_TLB; index++) {
-		tlb_read(&entryhi, &entrylo, index);
-		entrylo = entrylo & (~TLB_VALID_BIT);
-		tlb_write(entryhi, entrylo, index);
-	}
-
-	splx(spl);
-
+	spinlock_release(&global);
 	return 0;
 }
 
@@ -195,6 +201,9 @@ as_destroy(struct addrspace *as)
 	kfree(as->l2_pt);
 	kfree(as);
 
+	// TODO: is this necessary
+	tlb_invalidate();
+
 	spinlock_release(&global);
 }
 
@@ -208,18 +217,11 @@ as_activate(void)
 		return;
 	}
 
-	int spl = splhigh();
-	uint32_t entryhi;
-	uint32_t entrylo;
-	uint32_t index;
+	spinlock_acquire(&global);
 
-	for (index = 0; index < NUM_TLB; index++) {
-		tlb_read(&entryhi, &entrylo, index);
-		entrylo = entrylo & (~TLB_VALID_BIT);
-		tlb_write(entryhi, entrylo, index);
-	}
+	tlb_invalidate();
 
-	splx(spl);
+	spinlock_release(&global);
 }
 
 void

@@ -30,10 +30,10 @@ struct vnode *swap_disk;
 const char *swap_dir = "lhd0raw:";
 
 static struct spinlock counter_spinlock = SPINLOCK_INITIALIZER;
-static volatile int swap_out_counter = 0;
+static volatile int swap_out_counter = 1;
 static volatile p_page_t swap_clock;
 
-#define SWAP_OUT_COUNT    5000
+#define SWAP_OUT_COUNT    0x1000
 #define NUM_FREE_PPAGES   8
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -269,24 +269,24 @@ vm_tlbshootdown(const struct tlbshootdown *tlbsd)
 // }
 
 
-int
-swap_out()
-{
-    spinlock_acquire(&cm_spinlock);
-    kprintf("Pages used: %x\n", cm_counter);
-    spinlock_release(&cm_spinlock);
+// int
+// swap_out()
+// {
+//     spinlock_acquire(&cm_spinlock);
+//     kprintf("Pages used: %x, PID: %d\n", cm_counter, curproc->pid);
+//     spinlock_release(&cm_spinlock);
 
-    // size_t free_pages = last_page - cm_counter;
-    // p_page_t first_clock = swap_clock;
+//     // size_t free_pages = last_page - cm_counter;
+//     // p_page_t first_clock = swap_clock;
 
-    // if (free_pages < NUM_FREE_PPAGES) {
-    //     do {
+//     // if (free_pages < NUM_FREE_PPAGES) {
+//     //     do {
             
-    //     } while (swap_clock != first_clock);
-    // }
+//     //     } while (swap_clock != first_clock);
+//     // }
 
-    return 0;
-}
+//     return 0;
+// }
 
 /*
 (Pasindu's thoughts; don't worry if this is gibberish):
@@ -300,16 +300,37 @@ if not specified (that is, valid), assume readable and writable.
 int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
-    spinlock_acquire(&counter_spinlock);
+    // spinlock_acquire(&counter_spinlock);
 
-    if (swap_out_counter == SWAP_OUT_COUNT - 1) {
-        swap_out_counter = 0;
-        spinlock_release(&counter_spinlock);
-        swap_out();
-    } else {
-        swap_out_counter++;
-        spinlock_release(&counter_spinlock);
-    }
+    // if (swap_out_counter == SWAP_OUT_COUNT - 1) {
+    //     swap_out_counter = 0;
+    //     spinlock_release(&counter_spinlock);
+    //     spinlock_acquire(&cm_spinlock);
+    //     kprintf("Pages used: %x, PID: %d, faultaddress: %x\n", cm_counter, curproc->pid, faultaddress);
+    //     spinlock_release(&cm_spinlock);
+    // } else {
+    //     swap_out_counter++;
+    //     spinlock_release(&counter_spinlock);
+    // }
+
+    // spinlock_acquire(&counter_spinlock);
+
+    // if ((swap_out_counter % SWAP_OUT_COUNT) == 0) {
+    //     kprintf("Pages used: %x, PID: %d, faultaddress: %x, type: %d\n", cm_counter, curproc->pid, faultaddress, faulttype); 
+    //     kprintf("%x\n", swap_out_counter);      
+    // }
+
+
+
+    // // if (swap_out_counter == SWAP_OUT_COUNT - 1) {
+    // //     swap_out_counter = 0;       
+    // // } else {
+    // //     swap_out_counter++;
+    // // }
+
+    // spinlock_release(&counter_spinlock);
+
+
 
     struct addrspace *as = curproc->p_addrspace;
     spinlock_acquire(&global);
@@ -325,7 +346,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     v_page_l2_t v_l2 = L2_PNUM(fault_page);
     v_page_l1_t v_l1 = L1_PNUM(fault_page);
 
-    lock_acquire(as->as_lock);
+    // lock_acquire(as->as_lock);
 
     struct l2_pt *l2_pt = as->l2_pt;
     l2_entry_t l2_entry = l2_pt->l2_entries[v_l2];
@@ -334,7 +355,15 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     // Get the l1 page table.
     if (l2_entry & ENTRY_VALID) {
-        if (faulttype == VM_FAULT_WRITE && !(l2_entry & ENTRY_WRITABLE)) {
+
+    // spinlock_acquire(&counter_spinlock);
+
+    // if ((swap_out_counter % SWAP_OUT_COUNT) == 0) {
+    //     kprintf("L2 VALID here: %x\n", l2_entry);       
+    // }
+
+    // spinlock_release(&counter_spinlock);
+        if (faulttype == VM_FAULT_READONLY && !(l2_entry & ENTRY_WRITABLE)) {
             v_page_t v_page = l2_entry & PAGE_MASK;
             p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
 
@@ -344,8 +373,9 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 result = l1_create(&l1_pt);
                 if (result) {
                     spinlock_release(&cm_spinlock);
-                    lock_release(as->as_lock);
+                    // lock_release(as->as_lock);
                     spinlock_release(&global);
+                    // kprintf("out of memory l1 creation\n");
                     return result;
                 }
 
@@ -376,10 +406,18 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);
         }
     } else {
+    // spinlock_acquire(&counter_spinlock);
+
+    // if ((swap_out_counter % SWAP_OUT_COUNT) == 0) {
+    //     kprintf("L2 INVALID here: %x\n", l2_entry);       
+    // }
+
+    // spinlock_release(&counter_spinlock);
         result = l1_create(&l1_pt);
         if (result) {
-            lock_release(as->as_lock);
+            // lock_release(as->as_lock);
             spinlock_release(&global);
+            // kprintf("out of memory l1 creation\n");
             return result;
         }
 
@@ -404,7 +442,15 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     // Get the faulting address' physical address
     if (l1_entry & ENTRY_VALID) {
-        if (faulttype == VM_FAULT_WRITE && !(l1_entry & ENTRY_WRITABLE)) {
+
+    // spinlock_acquire(&counter_spinlock);
+
+    // if ((swap_out_counter % SWAP_OUT_COUNT) == 0) {
+    //     kprintf("L1 VALID here: %x\n", l1_entry);       
+    // }
+
+    // spinlock_release(&counter_spinlock);
+        if (faulttype == VM_FAULT_READONLY && !(l1_entry & ENTRY_WRITABLE)) {
             p_page_t old_page = l1_entry & PAGE_MASK;
 
             spinlock_acquire(&cm_spinlock);
@@ -415,7 +461,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 result = find_free(1, &p_page);
                 if (result) {
                     spinlock_release(&cm_spinlock);
-                    lock_release(as->as_lock);
+                    // lock_release(as->as_lock);
                     spinlock_release(&global);
                     return result;
                 }
@@ -450,13 +496,21 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             p_page = l1_pt->l1_entries[v_l1] & PAGE_MASK;
         }
     } else {
+        
+    // spinlock_acquire(&counter_spinlock);
+
+    // if ((swap_out_counter % SWAP_OUT_COUNT) == 0) {
+    //     kprintf("L1 INVALID here: %x\n", l1_entry);       
+    // }
+
+    // spinlock_release(&counter_spinlock);
         spinlock_acquire(&cm_spinlock);
 
         p_page = first_alloc_page;
         result = find_free(1, &p_page);
         if (result) {
             spinlock_release(&cm_spinlock);
-            lock_release(as->as_lock);
+            // lock_release(as->as_lock);
             spinlock_release(&global);
             return result;
         }
@@ -493,14 +547,48 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         entrylo = 0 | p_page_high | TLBLO_VALID;        
     }
 
+    // spinlock_acquire(&counter_spinlock);
+
+    // if ((swap_out_counter % SWAP_OUT_COUNT) == 0) {
+    //     kprintf("Entryhi: %x\n", entryhi);
+    //     kprintf("Entrylo: %x\n", entrylo); 
+    //     kprintf("TLB index: %x\n", V_TO_INDEX(fault_page));      
+    // }
+
+    // spinlock_release(&counter_spinlock);
+    
+
+    // pretty ugly tlb eviction. oh well. this is needed for matmult to work. otherwise, we get thrashing
     int spl = splhigh();
 
-    tlb_write(entryhi, entrylo, V_TO_INDEX(fault_page));
+	uint32_t entryhi2;
+	uint32_t entrylo2;
+	uint32_t index;
+    bool written = false;
+
+	for (index = 0; index < NUM_TLB; index++) {
+		tlb_read(&entryhi2, &entrylo2, index);
+        if ((entryhi & TLBHI_VPAGE) == (entryhi2 & TLBHI_VPAGE)) {
+            tlb_write(entryhi, entrylo, index);
+            written = true;
+        }
+	}
+
+    if (!written) {
+        tlb_random(entryhi, entrylo);
+    }
 
     splx(spl);
 
-    lock_release(as->as_lock);
+    // lock_release(as->as_lock);
     spinlock_release(&global);
+
+    // spinlock_acquire(&counter_spinlock);
+    // // if (swap_out_counter < 0x300){
+    //     // swap_out_counter++;
+    // // }
+    // spinlock_release(&counter_spinlock);
+
     return 0;
 }
 

@@ -566,6 +566,7 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
         return EINVAL;
     }
     struct addrspace *as = curproc->p_addrspace;
+    spinlock_acquire(&global);
 
     lock_acquire(as->as_lock);   
 
@@ -573,17 +574,20 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
     vaddr_t new_heap_end = old_heap_end + amount;
     if (new_heap_end < as->heap_base) {
         lock_release(as->as_lock);
+        spinlock_release(&global);
         return EINVAL;
     }
 
     int64_t overflow = (int64_t)old_heap_end + (int64_t)amount;
     if (overflow > USERSPACETOP || overflow < 0){
         lock_release(as->as_lock);
+        spinlock_release(&global);
         return EINVAL;
     }
 
     if (new_heap_end > as->stack_top) {
         lock_release(as->as_lock);
+        spinlock_release(&global);
         return ENOMEM;
     }
 
@@ -628,6 +632,7 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
     as->brk = new_heap_end;
 
     lock_release(as->as_lock);
+    spinlock_release(&global);
     
     return 0;
 }

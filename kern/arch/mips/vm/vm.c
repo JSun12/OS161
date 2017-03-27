@@ -662,9 +662,82 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
             return ENOMEM;
         }
 
+                /*
+                void
+        free_vpage(struct l2_pt *l2_pt, v_page_t v_page)
+        {
+            KASSERT(l2_pt != NULL);
+
+            v_page_l2_t v_l2 = L2_PNUM(PAGE_TO_ADDR(v_page));
+            v_page_l1_t v_l1 = L1_PNUM(PAGE_TO_ADDR(v_page));
+
+            if (l2_pt->l2_entries[v_l2] & ENTRY_VALID) {
+                v_page_t l1_pt_page = l2_pt->l2_entries[v_l2] & PAGE_MASK;
+                struct l1_pt *l1_pt = (struct l1_pt*) PAGE_TO_ADDR(l1_pt_page);
+
+                l1_entry_t l1_entry = l1_pt->l1_entries[v_l1];
+
+                if (l1_entry & ENTRY_VALID) {
+                    p_page_t p_page = l1_entry & PAGE_MASK;
+
+                    spinlock_acquire(&cm_spinlock);
+
+                    if (cm_getref(p_page) > 1) {
+                        cm_decref(p_page);
+                    } else {
+                        free_ppage(p_page);
+                    }
+
+                    spinlock_release(&cm_spinlock);
+
+                    l1_pt->l1_entries[v_l1] = 0;
+                }
+            }
+        }
+        */
+
         //XXX: Am I dealing with the first old_l2 / old_l1 correctly? Heap_end is not allocated Im assuming...?
         vaddr_t cur_vaddr = old_heap_end;
+        if (old_l2 == new_l2){
+            for (v_page_l1_t v_l1 = old_l1; v_l1 < new_l1; v_l1++) {
 
+                v_page_l2_t v_l2 = old_l2;
+                int result;
+                struct l2_pt *l2_pt = as->l2_pt;
+                l2_entry_t l2_entry = l2_pt->l2_entries[v_l2];
+                struct l1_pt *l1_pt = (struct l1_pt *) PAGE_TO_ADDR(l2_entry & PAGE_MASK);
+                p_page_t p_page;
+
+                spinlock_acquire(&cm_spinlock);
+
+                p_page = first_alloc_page;
+                result = find_free(1, &p_page);
+                if (result) {
+                    spinlock_release(&cm_spinlock);
+                    lock_release(as->as_lock);
+                    spinlock_release(&global);
+                    return result;
+                }
+
+                cm_counter++;
+                cm->cm_entries[p_page] = 0
+                                        | PP_USED
+                                        | ADDR_TO_PAGE(cur_vaddr);
+
+                set_pid8(p_page, curproc->pid, 0);
+
+                l1_pt->l1_entries[v_l1] = 0
+                                        | ENTRY_VALID
+                                        | ENTRY_READABLE
+                                        | ENTRY_WRITABLE
+                                        | p_page;
+                cm_incref(p_page);
+
+                cur_vaddr += PAGE_SIZE;
+                spinlock_release(&cm_spinlock);
+            }
+        }
+        /*
         if (old_l2 == new_l2) {
             for (v_page_l1_t v_l1 = old_l1; v_l1 < new_l1; v_l1++) {
                 v_page_l2_t v_l2 = old_l2;
@@ -702,11 +775,30 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
 
 
                 cur_vaddr += PAGE_SIZE;
-            }
-        } else {
+            }*/
+        else {
             // Fill up old_l2's l1 table
             for (v_page_l1_t v_l1 = old_l1; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
+                /*
+                v_page_l2_t v_l2 = old_l2;
 
+                int result;
+                struct l1_pt *l1_pt;
+                struct l2_pt *l2_pt = as->l2_pt;
+
+                spinlock_acquire(&cm_spinlock);
+
+                //XXX: sbrk doesnt return result. I just copied this code from vm_fault
+                result = l1_create(&l1_pt);
+                if (result) {
+                    spinlock_release(&cm_spinlock);
+                    lock_release(as->as_lock);
+                    spinlock_release(&global);
+                    return result;
+                }
+
+                p_page_t new_p_page = ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt));
+                set_pid8(new_p_page, curproc->pid, 0);*/
             }
             // Check to see if we need to completely fill any l2 tables with blank entries
             if (new_l2 - old_l2 > 1){

@@ -514,44 +514,50 @@ free_vpage(struct l2_pt *l2_pt, v_page_t v_page)
     v_page_l2_t v_l2 = L2_PNUM(PAGE_TO_ADDR(v_page));
     v_page_l1_t v_l1 = L1_PNUM(PAGE_TO_ADDR(v_page));
 
-    v_page_t l1_pt_page = l2_pt->l2_entries[v_l2] & PAGE_MASK;
-    struct l1_pt *l1_pt = (struct l1_pt*) PAGE_TO_ADDR(l1_pt_page);
+    if (l2_pt->l2_entries[v_l2] & ENTRY_VALID) {
+        v_page_t l1_pt_page = l2_pt->l2_entries[v_l2] & PAGE_MASK;
+        struct l1_pt *l1_pt = (struct l1_pt*) PAGE_TO_ADDR(l1_pt_page);
 
-    l1_entry_t l1_entry = l1_pt->l1_entries[v_l1];
+        l1_entry_t l1_entry = l1_pt->l1_entries[v_l1];
 
-    if (l1_entry & ENTRY_VALID) {
-        p_page_t p_page = l1_entry & PAGE_MASK;
+        if (l1_entry & ENTRY_VALID) {
+            p_page_t p_page = l1_entry & PAGE_MASK;
 
-        spinlock_acquire(&cm_spinlock);
+            spinlock_acquire(&cm_spinlock);
 
-        if (cm_getref(p_page) > 1) {
-            cm_decref(p_page);
-        } else {
-            free_ppage(p_page);
+            if (cm_getref(p_page) > 1) {
+                cm_decref(p_page);
+            } else {
+                free_ppage(p_page);
+            }
+
+            spinlock_release(&cm_spinlock);
+
+            l1_pt->l1_entries[v_l1] = 0;
         }
-
-        spinlock_release(&cm_spinlock);
     }
 }
 
 void
 free_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2)
 {
-    v_page_t v_page = l2_pt->l2_entries[v_l2] & PAGE_MASK;
-    p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
+    if (l2_pt->l2_entries[v_l2] & ENTRY_VALID) {
+        v_page_t v_page = l2_pt->l2_entries[v_l2] & PAGE_MASK;
+        p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
 
-    spinlock_acquire(&cm_spinlock);
+        spinlock_acquire(&cm_spinlock);
 
-    if (cm_getref(p_page) > 1) {
-        cm_decref(p_page);
-    } else {
-        struct l1_pt *l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);
-        kfree(l1_pt);
+        if (cm_getref(p_page) > 1) {
+            cm_decref(p_page);
+        } else {
+            struct l1_pt *l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);
+            kfree(l1_pt);
+        }
+
+        spinlock_release(&cm_spinlock);
+
+        l2_pt->l2_entries[v_l2] = 0;
     }
-
-    spinlock_release(&cm_spinlock);
-
-    l2_pt->l2_entries[v_l2] = 0;
 }
 
 /*

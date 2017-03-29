@@ -58,6 +58,10 @@ the process when this happens).
 
 TODO: we need to implement tlb shootdown in order to use the vm on multiple
 processors.
+
+
+TODO: Make sure we can evict kernel pages. 
+TODO: use in_ram and in_swap for the KASSERTS and other places.
 */
 
 
@@ -68,16 +72,19 @@ processors.
 #define VM_FAULT_WRITE       1    /* A write was attempted */
 #define VM_FAULT_READONLY    2    /* A write to a readonly page was attempted*/
 
-#define COREMAP_PAGES        4    /* Pages used for coremap */
-#define NUM_PPAGES           COREMAP_PAGES*PAGE_SIZE/4    /* Number of page frames managed by coremap */
-#define VP_MASK              0x000fffff    /* Mask to extract the virtual page of the page frame */
+#define COREMAP_PAGES        8    /* Pages used for coremap */
+#define NUM_PPAGES           COREMAP_PAGES*PAGE_SIZE/8    /* Number of page frames managed by coremap */
 
 #define PP_USED              0x80000000    /* Bit indicating if physical page unused */
 #define KMALLOC_END          0x40000000    /* Bit indicating the last page of a kmalloc; used for kfree */
-#define REF_COUNT            0x00fc0000    // TODO: maybe we need the pid number
+#define DIRTY                0x20000000    /* Bit indicating if the page was modified since it was created/swapped in from disk */
+#define REF_BIT              0x10000000    /* Bit used in swapping clock, indicating if ppage was in tlb */
+#define REF_COUNT            0x03f00000    // TODO: maybe we need the pid number
 #define GET_REF(entry)       (((entry) & REF_COUNT) >> 20)
 #define SET_REF(entry, ref)  ((entry) = ((entry) & (~REF_COUNT)) | (((ref) & 0x0000003f) << 20))
+#define VP_MASK              0x000fffff    /* Mask to extract the virtual page of the page frame */
 
+#define NUM_CM_PIDS          4
 #define PID8_1               0x000000ff
 #define PID8_2               0x0000ff00
 #define PID8_3               0x00ff0000
@@ -183,12 +190,22 @@ struct l1_pt {
 
 
 /* Global coremap functions */
+bool in_ram(p_page_t);
+bool in_swap(p_page_t);
+bool in_all_memory(p_page_t);
+
 void free_ppage(p_page_t);
+void free_ppage_swap(p_page_t);
+
 void free_vpage(struct l2_pt *, v_page_t);
 void free_l1_pt(struct l2_pt *, v_page_l2_t);
+
 size_t cm_getref(p_page_t);
 void cm_incref(p_page_t);
 void cm_decref(p_page_t);
+
+void set_pid8(p_page_t, pid_t, uint32_t);
+pid_t get_pid8(p_page_t, uint32_t);
 
 /* Initialization function */
 void vm_bootstrap(void);
@@ -196,6 +213,7 @@ void swap_bootstrap(void);
 
 /* Swapping */
 int swap_out(void);
+int swap_in(p_page_t, p_page_t);
 
 /* Fault handling function called by trap code */
 int vm_fault(int, vaddr_t);

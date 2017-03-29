@@ -11,6 +11,7 @@
 #include <mips/tlb.h>
 #include <vfs.h>
 #include <kern/fcntl.h>
+#include <uio.h>
 #include <vnode.h>
 
 struct spinlock global = SPINLOCK_INITIALIZER;
@@ -24,19 +25,42 @@ volatile size_t cm_counter = 0;
 
 static p_page_t first_alloc_page; /* First physical page that can be dynamically allocated */
 static p_page_t last_page; /* One page past the last free physical page in RAM */
+static p_page_t first_page_swap; /* First physical page number that is allocated to swap */
+static p_page_t last_page_swap; /* One page past the last free physical page SWAP */
 
 // TODO: maybe this couting policy is ugly. If it works, clean it up by using proper types, etc.
 struct vnode *swap_disk;
 const char *swap_dir = "lhd0raw:";
 
-//static struct spinlock counter_spinlock = SPINLOCK_INITIALIZER;
+static struct spinlock counter_spinlock = SPINLOCK_INITIALIZER;
 static volatile int swap_out_counter = 1;
-static volatile p_page_t swap_clock;
+static volatile p_page_t swapclock;
 
-#define SWAP_OUT_COUNT    0x1000
+#define SWAP_OUT_COUNT    0x8
 #define NUM_FREE_PPAGES   8
 
 /////////////////////////////////////////////////////////////////////////////////////////
+bool
+in_ram(p_page_t p_page)
+{   
+    bool in_ram = (first_alloc_page <= p_page && p_page < last_page);
+    return in_ram;
+}
+
+bool
+in_swap(p_page_t p_page)
+{
+    bool in_swap = (first_page_swap <= p_page && p_page < last_page_swap);
+    return in_swap;
+}
+
+bool
+in_all_memory(p_page_t p_page)
+{
+    bool in_all_memory = (first_alloc_page <= p_page && p_page < last_page_swap);
+    return in_all_memory;
+}
+
 
 static
 void
@@ -56,6 +80,8 @@ p_page_used(p_page_t p_page)
     return used;
 }
 
+
+// TODO: change this to a for loop
 static
 int
 find_free(size_t npages, p_page_t *start)
@@ -87,16 +113,24 @@ find_free(size_t npages, p_page_t *start)
 void
 free_ppage(p_page_t p_page)
 {
-    KASSERT(first_alloc_page <= p_page && p_page < last_page);
+    KASSERT(in_ram(p_page));
 
     cm->cm_entries[p_page] = 0;
     cm_counter--;
 }
 
+void
+free_ppage_swap(p_page_t p_page)
+{
+    KASSERT(in_swap(p_page));
+
+    cm->cm_entries[p_page] = 0; 
+}
+
 size_t
 cm_getref(p_page_t p_page)
 {
-    KASSERT(first_alloc_page <= p_page && p_page < last_page);
+    KASSERT(in_all_memory(p_page));
 
     return GET_REF(cm->cm_entries[p_page]);
 }
@@ -104,7 +138,7 @@ cm_getref(p_page_t p_page)
 void
 cm_incref(p_page_t p_page)
 {
-    KASSERT(first_alloc_page <= p_page && p_page < last_page);
+    KASSERT(in_all_memory(p_page));
 
     size_t curref = GET_REF(cm->cm_entries[p_page]);
     curref++;
@@ -114,7 +148,7 @@ cm_incref(p_page_t p_page)
 void
 cm_decref(p_page_t p_page)
 {
-    KASSERT(first_alloc_page <= p_page && p_page < last_page);
+    KASSERT(in_all_memory(p_page));
 
     size_t curref = GET_REF(cm->cm_entries[p_page]);
     curref--;
@@ -122,12 +156,11 @@ cm_decref(p_page_t p_page)
 }
 
 // TODO: too many magic numbers?
-static
 void
-set_pid8(p_page_t p_page, pid_t pid, int pos)
+set_pid8(p_page_t p_page, pid_t pid, uint32_t pos)
 {
-    KASSERT(0 <= pos && pos < 4);
-    KASSERT(first_alloc_page <= p_page && p_page < last_page);
+    KASSERT(pos < NUM_CM_PIDS);
+    KASSERT(in_all_memory(p_page));
 
     pid_t pid_to_add = 0;
 
@@ -135,7 +168,17 @@ set_pid8(p_page_t p_page, pid_t pid, int pos)
         pid_to_add = pid;
     }
 
-    cm->pids8_entries[p_page] = 0 | (pid_to_add << pos*8);
+    cm->pids8_entries[p_page] = cm->pids8_entries[p_page] & (~(0x000000ff << pos*8));
+    cm->pids8_entries[p_page] = cm->pids8_entries[p_page] | (pid_to_add << pos*8);
+}
+
+pid_t
+get_pid8(p_page_t p_page, uint32_t pos) 
+{
+    KASSERT(pos < NUM_CM_PIDS);
+    KASSERT(in_all_memory(p_page));
+
+    return (cm->pids8_entries[p_page] & (0x000000ff << pos*8)) >> pos*8;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -150,7 +193,7 @@ vm_bootstrap()
 
     KASSERT(ram_stealmem(0) % PAGE_SIZE == 0);
     first_alloc_page = ADDR_TO_PAGE(ram_stealmem(0));
-    swap_clock = first_alloc_page;
+    swapclock = first_alloc_page;
     last_page = ADDR_TO_PAGE(ram_getsize());
 
     size_t pages_used = first_alloc_page;
@@ -164,6 +207,8 @@ swap_bootstrap()
 {
     // TODO: this is probably not appropriate
     vfs_open((char *) swap_dir, O_RDWR, 0, &swap_disk);
+    first_page_swap = last_page + 1; 
+    last_page_swap = 1024;
 }
 
 vaddr_t
@@ -255,38 +300,261 @@ vm_tlbshootdown(const struct tlbshootdown *tlbsd)
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////
-// static
-// p_page_t
-// next_clock_val(p_page_t prev_clock)
-// {
-//     KASSERT(first_alloc_page <= prev_clock && prev_clock < last_page);
+static
+bool
+entry_swappable(p_page_t p_page)
+{
+    KASSERT(in_ram(p_page));
 
-//     if (prev_clock == last_page - 1) {
-//         return first_alloc_page;
-//     } else {
-//         return prev_clock++;
-//     }
-// }
+    if (!p_page_used(p_page)) {
+        return false;
+    }
 
+    // For now, we don't want to evict l1 page tables
+    if ((cm->cm_entries[p_page] & PAGE_MASK) >= 0x00080000) {
+        return false;
+    }
 
-// int
-// swap_out()
-// {
-//     spinlock_acquire(&cm_spinlock);
-//     kprintf("Pages used: %x, PID: %d\n", cm_counter, curproc->pid);
-//     spinlock_release(&cm_spinlock);
+    size_t ref = cm_getref(p_page);
+    if (ref > NUM_CM_PIDS) {
+        return false;
+    }
 
-//     // size_t free_pages = last_page - cm_counter;
-//     // p_page_t first_clock = swap_clock;
+    for (uint32_t pos = 0; pos < ref; pos++) {
+        pid_t pid = get_pid8(p_page, pos); 
+        if (pid == 0) {
+            return false;
+        }
+    }
 
-//     // if (free_pages < NUM_FREE_PPAGES) {
-//     //     do {
+    return true;
+}
 
-//     //     } while (swap_clock != first_clock);
-//     // }
+// TODO: magic number
+static
+bool
+entry_recently_used(p_page_t p_page)
+{
+    KASSERT(in_ram(p_page));
+    
+    if (cm->cm_entries[p_page] & REF_BIT) {
+        return true;
+    }
 
-//     return 0;
-// }
+    int spl = splhigh();
+
+	uint32_t entryhi;
+	uint32_t entrylo;
+	uint32_t index;
+
+	for (index = 0; index < NUM_TLB; index++) {
+		tlb_read(&entryhi, &entrylo, index);
+        if (p_page == ((entrylo & TLBLO_PPAGE) >> 12)) {
+            return true;
+        }
+	}
+
+    splx(spl);
+
+    return false;
+}
+
+//TODO: Proper error code
+static
+int
+find_free_swap(p_page_t *p_page)
+{
+    p_page_t page; 
+    for (page = first_page_swap; page < last_page_swap; page++) {
+        if (p_page_used(page)) {
+            *p_page = page;
+            return 0; 
+        }
+    }
+
+    return ENOMEM; 
+}
+
+static 
+off_t
+swap_offset(p_page_t p_page) 
+{
+    KASSERT(in_swap(p_page));
+
+    return PAGE_TO_ADDR(p_page - first_page_swap);
+}
+
+static
+struct uio *
+swap_evict_uio(p_page_t p_page)
+{
+    KASSERT(in_swap(p_page));
+
+    struct iovec *iov = kmalloc(sizeof(struct iovec)); 
+    struct uio *u = kmalloc(sizeof(struct uio));
+
+    // TODO: same dirty hack; using the kernel to take data from memory
+    iov->iov_kbase = (void *) PAGE_TO_ADDR(PPAGE_TO_KVPAGE(swapclock));
+    iov->iov_len = PAGE_SIZE;
+    u->uio_iov = iov;
+    u->uio_iovcnt = 1;
+    u->uio_resid = PAGE_SIZE;
+    u->uio_offset = swap_offset(p_page);
+    u->uio_segflg = UIO_SYSSPACE;
+    u->uio_rw = UIO_WRITE;
+    u->uio_space = curproc->p_addrspace;
+
+    return u;
+}
+
+static
+struct uio *
+swap_load_uio(p_page_t p_page, p_page_t old_p_page)
+{
+    KASSERT(in_ram(p_page));
+
+    struct iovec *iov = kmalloc(sizeof(struct iovec)); 
+    struct uio *u = kmalloc(sizeof(struct uio));
+
+    // TODO: same dirty hack; using the kernel to take data from memory
+    iov->iov_kbase = (void *) PAGE_TO_ADDR(PPAGE_TO_KVPAGE(p_page));
+    iov->iov_len = PAGE_SIZE;
+    u->uio_iov = iov;
+    u->uio_iovcnt = 1;
+    u->uio_resid = PAGE_SIZE;
+    u->uio_offset = swap_offset(old_p_page);
+    u->uio_segflg = UIO_SYSSPACE;
+    u->uio_rw = UIO_READ;
+    u->uio_space = curproc->p_addrspace;
+
+    return u;
+}
+
+static 
+void 
+swap_uio_cleanup(struct uio *u)
+{
+    kfree(u->uio_iov); 
+    kfree(u); 
+}
+
+static
+void
+update_pt_entries(p_page_t swap_to_page)
+{
+    size_t refs = cm_getref(swap_to_page);
+
+    for (uint32_t pos = 0; pos < refs; pos++) {
+        pid_t pid = get_pid8(swap_to_page, pos);
+        
+        struct proc *proc = get_pid(pid);
+        KASSERT(proc != NULL); 
+
+        struct addrspace *as = proc->p_addrspace; 
+        KASSERT(as != NULL); 
+
+        struct l2_pt *l2_pt = as->l2_pt; 
+
+        v_page_t v_page = cm->cm_entries[swap_to_page] & VP_MASK;
+        v_page_l2_t v_l2 = L2_PNUM(PAGE_TO_ADDR(v_page)); 
+        v_page_l1_t v_l1 = L1_PNUM(PAGE_TO_ADDR(v_page));
+
+        l2_entry_t l2_entry = l2_pt->l2_entries[v_l2]; 
+
+        KASSERT(l2_entry & ENTRY_VALID); 
+        
+        struct l1_pt *l1_pt = (struct l1_pt *) PAGE_TO_ADDR(l2_entry & PAGE_MASK);
+
+        l1_pt->l1_entries[v_l1] = l1_pt->l1_entries[v_l1] & (~PAGE_MASK);   
+        l1_pt->l1_entries[v_l1] = l1_pt->l1_entries[v_l1] & swap_to_page;   
+    }
+}
+
+static
+void
+swapclock_tick()
+{
+    KASSERT(in_ram(swapclock));
+
+    if (swapclock == last_page - 1) {
+        swapclock = first_alloc_page;
+    } else {
+        swapclock++;
+    }
+}
+
+// TODO: Proper error numbers
+// clean up iovec in uio
+int
+swap_out()
+{
+    size_t free_pages = last_page - cm_counter;
+
+    if (free_pages >= NUM_FREE_PPAGES) {
+        return -1; 
+    }
+
+    p_page_t first_clock = swapclock;
+    int cycles = 0; 
+    int result;
+
+    spinlock_acquire(&cm_spinlock);
+
+    // We iterate for 2 cycles, since after the first cycle, the reference bits are cleared
+    while (cycles < 2) {
+        if (entry_swappable(swapclock) && !entry_recently_used(swapclock)) {
+            p_page_t swap_to_page; 
+
+            result = find_free_swap(&swap_to_page);
+            if (result) {
+                spinlock_release(&cm_spinlock);
+                return result;
+            }
+
+            struct uio *u = swap_evict_uio(swap_to_page);
+            VOP_WRITE(swap_disk, u);
+            swap_uio_cleanup(u);
+
+            cm->cm_entries[swap_to_page] = cm->cm_entries[swapclock];
+            cm->pids8_entries[swap_to_page] = cm->pids8_entries[swapclock];
+
+            update_pt_entries(swap_to_page);
+
+            free_ppage(swapclock);
+
+            spinlock_release(&cm_spinlock);
+            return 0;
+        }
+
+        cm->cm_entries[swapclock] = cm->cm_entries[swapclock] & (~REF_BIT);
+
+        swapclock_tick(); 
+        if (swapclock == first_clock) {
+            cycles++;
+        }
+    }
+
+    spinlock_release(&cm_spinlock);
+
+    return -1;
+}
+
+int
+swap_in(p_page_t p_page, p_page_t old_p_page)
+{
+    KASSERT(!(cm->cm_entries[p_page] & ENTRY_VALID));
+    KASSERT(in_ram(p_page));
+    KASSERT(cm->cm_entries[old_p_page] & ENTRY_VALID);
+    KASSERT(in_swap(old_p_page));
+
+    struct uio *u = swap_load_uio(p_page, old_p_page);
+    VOP_READ(swap_disk, u);
+    swap_uio_cleanup(u);
+
+    return 0; 
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /*
 (Pasindu's thoughts; don't worry if this is gibberish):
@@ -300,18 +568,18 @@ if not specified (that is, valid), assume readable and writable.
 int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
-    // spinlock_acquire(&counter_spinlock);
+    spinlock_acquire(&global);
 
-    // if (swap_out_counter == SWAP_OUT_COUNT - 1) {
-    //     swap_out_counter = 0;
-    //     spinlock_release(&counter_spinlock);
-    //     spinlock_acquire(&cm_spinlock);
-    //     kprintf("Pages used: %x, PID: %d, faultaddress: %x\n", cm_counter, curproc->pid, faultaddress);
-    //     spinlock_release(&cm_spinlock);
-    // } else {
-    //     swap_out_counter++;
-    //     spinlock_release(&counter_spinlock);
-    // }
+    spinlock_acquire(&counter_spinlock);
+
+    if (swap_out_counter == SWAP_OUT_COUNT - 1 && 0) {      
+        swap_out_counter = 0;
+        spinlock_release(&counter_spinlock);
+        swap_out();
+    } else {
+        swap_out_counter++;
+        spinlock_release(&counter_spinlock);
+    }
 
     // spinlock_acquire(&counter_spinlock);
 
@@ -333,7 +601,8 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
 
     struct addrspace *as = curproc->p_addrspace;
-    spinlock_acquire(&global);
+    pid_t pid = curproc->pid;
+
     // TODO: do a proper address check (make sure kernel addresses aren't called)
     if (as->brk <= faultaddress && faultaddress < as->stack_top) {
         spinlock_release(&global);
@@ -366,6 +635,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         if (faulttype == VM_FAULT_READONLY && !(l2_entry & ENTRY_WRITABLE)) {
             v_page_t v_page = l2_entry & PAGE_MASK;
             p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
+            KASSERT(in_all_memory(p_page));
 
             spinlock_acquire(&cm_spinlock);
 
@@ -380,7 +650,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 }
 
                 p_page_t new_p_page = ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt));
-                set_pid8(new_p_page, curproc->pid, 0);
 
                 struct l1_pt *l1_pt_orig = (struct l1_pt *) PAGE_TO_ADDR(v_page);
                 for (v_page_l1_t l1_val = 0; l1_val < NUM_L1PT_ENTRIES; l1_val++) {
@@ -392,8 +661,12 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                         | ENTRY_READABLE
                                         | ENTRY_WRITABLE
                                         | ADDR_TO_PAGE((vaddr_t) l1_pt);
-
                 cm_incref(new_p_page);
+                size_t refs = cm_getref(new_p_page);
+                if (refs <= NUM_CM_PIDS) {
+                    set_pid8(new_p_page, pid, refs - 1);
+                }
+
                 cm_decref(p_page);
             } else {
                 l2_pt->l2_entries[v_l2] = l2_pt->l2_entries[v_l2] | ENTRY_WRITABLE;
@@ -431,8 +704,12 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                 | v_page;
 
         p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
-        set_pid8(p_page, curproc->pid, 0);
-        cm_incref(KVPAGE_TO_PPAGE(v_page));
+
+        cm_incref(p_page);
+        size_t refs = cm_getref(p_page);
+        if (refs <= NUM_CM_PIDS) {
+            set_pid8(p_page, pid, refs - 1);
+        }
 
         spinlock_release(&cm_spinlock);
     }
@@ -452,6 +729,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     // spinlock_release(&counter_spinlock);
         if (faulttype == VM_FAULT_READONLY && !(l1_entry & ENTRY_WRITABLE)) {
             p_page_t old_page = l1_entry & PAGE_MASK;
+            KASSERT(in_all_memory(old_page));
 
             spinlock_acquire(&cm_spinlock);
 
@@ -470,16 +748,22 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 cm->cm_entries[p_page] = 0
                                        | PP_USED
                                        | ADDR_TO_PAGE(fault_page);
-
-                set_pid8(p_page, curproc->pid, 0);
-
                 cm_incref(p_page);
+                size_t refs = cm_getref(p_page);
+                if (refs <= NUM_CM_PIDS) {
+                    set_pid8(p_page, pid, refs - 1);
+                }
+
                 cm_decref(old_page);
 
-                // TODO: get rid of this dirty hack
-                const void *src = (const void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(old_page));
-                void *dst = (void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(p_page));
-                memmove(dst, src, (size_t) PAGE_SIZE);
+                if (in_swap(old_page)) {
+                    swap_in(p_page, old_page);
+                } else {
+                    // TODO: get rid of this dirty hack
+                    const void *src = (const void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(old_page));
+                    void *dst = (void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(p_page));
+                    memmove(dst, src, (size_t) PAGE_SIZE);
+                }
 
                 l1_pt->l1_entries[v_l1] = 0
                                         | ENTRY_VALID
@@ -488,12 +772,80 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                         | p_page;
             } else {
                 l1_pt->l1_entries[v_l1] = l1_pt->l1_entries[v_l1] | ENTRY_WRITABLE;
-                p_page = l1_pt->l1_entries[v_l1] & PAGE_MASK;
+                p_page_t old_page = l1_pt->l1_entries[v_l1] & PAGE_MASK;
+
+                if (in_swap(old_page)) {
+                    p_page = first_alloc_page;
+                    result = find_free(1, &p_page);
+                    if (result) {
+                        spinlock_release(&cm_spinlock);
+                        // lock_release(as->as_lock);
+                        spinlock_release(&global);
+                        return result;
+                    }
+
+                    cm_counter++;
+                    cm->cm_entries[p_page] = 0
+                                            | PP_USED
+                                            | ADDR_TO_PAGE(fault_page);
+
+                    l1_pt->l1_entries[v_l1] = 0
+                                            | ENTRY_VALID
+                                            | ENTRY_READABLE
+                                            | ENTRY_WRITABLE
+                                            | p_page;
+                    cm_incref(p_page);
+                    size_t refs = cm_getref(p_page);
+                    if (refs <= NUM_CM_PIDS) {
+                        set_pid8(p_page, pid, refs - 1);
+                    }        
+                
+                    swap_in(p_page, old_page);
+                    free_ppage_swap(old_page);                 
+                } else {
+                    p_page = old_page;
+                }
             }
 
             spinlock_release(&cm_spinlock);
         } else {
-            p_page = l1_pt->l1_entries[v_l1] & PAGE_MASK;
+            p_page_t old_page = l1_pt->l1_entries[v_l1] & PAGE_MASK;
+
+            spinlock_acquire(&cm_spinlock);
+
+            if (first_page_swap <= old_page && old_page < last_page_swap) {
+                p_page = first_alloc_page;
+                result = find_free(1, &p_page);
+                if (result) {
+                    spinlock_release(&cm_spinlock);
+                    // lock_release(as->as_lock);
+                    spinlock_release(&global);
+                    return result;
+                }
+
+                cm_counter++;
+                cm->cm_entries[p_page] = 0
+                                        | PP_USED
+                                        | ADDR_TO_PAGE(fault_page);
+
+                l1_pt->l1_entries[v_l1] = 0
+                                        | ENTRY_VALID
+                                        | ENTRY_READABLE
+                                        | ENTRY_WRITABLE
+                                        | p_page;
+                cm_incref(p_page);
+                size_t refs = cm_getref(p_page);
+                if (refs <= NUM_CM_PIDS) {
+                    set_pid8(p_page, pid, refs - 1);
+                }        
+            
+                swap_in(p_page, old_page);
+                free_ppage_swap(old_page);                 
+            } else {
+                p_page = old_page;
+            }
+
+            spinlock_release(&cm_spinlock);
         }
     } else {
 
@@ -520,14 +872,16 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                 | PP_USED
                                 | ADDR_TO_PAGE(fault_page);
 
-        set_pid8(p_page, curproc->pid, 0);
-
         l1_pt->l1_entries[v_l1] = 0
                                 | ENTRY_VALID
                                 | ENTRY_READABLE
                                 | ENTRY_WRITABLE
                                 | p_page;
         cm_incref(p_page);
+        size_t refs = cm_getref(p_page);
+        if (refs <= NUM_CM_PIDS) {
+            set_pid8(p_page, pid, refs - 1);
+        }        
 
         spinlock_release(&cm_spinlock);
     }
@@ -535,9 +889,9 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     uint32_t entryhi;
     uint32_t entrylo;
     l1_entry_t new_l1_entry = l1_pt->l1_entries[v_l1];
-
     p_page_t p_page_high = p_page << 12;
-    pid_t pid = curproc->pid;
+
+    cm->cm_entries[p_page] = cm->cm_entries[p_page] | REF_BIT;
 
     entryhi = 0 | fault_page | pid << 6;
 
@@ -571,6 +925,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         if ((entryhi & TLBHI_VPAGE) == (entryhi2 & TLBHI_VPAGE)) {
             tlb_write(entryhi, entrylo, index);
             written = true;
+            break;
         }
 	}
 

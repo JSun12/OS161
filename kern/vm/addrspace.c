@@ -92,7 +92,7 @@ as_create(void)
 }
 
 int
-as_copy(struct addrspace *old, struct addrspace **ret)
+as_copy(struct addrspace *old, struct addrspace **ret, pid_t retpid)
 {
 	struct addrspace *newas;
 
@@ -114,7 +114,13 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 			p_page_t p_page1 = KVPAGE_TO_PPAGE(l2_pt_old->l2_entries[v_l2] & PAGE_MASK);
 
 			spinlock_acquire(&cm_spinlock);
+
 			cm_incref(p_page1); // TODO: maybe change this name p_page1
+			size_t refs = cm_getref(p_page1);
+			if (refs <= NUM_CM_PIDS) {
+				set_pid8(p_page1, retpid, refs - 1);
+			}
+				
 			spinlock_release(&cm_spinlock);
 
 			struct l1_pt *l1_pt_old = (struct l1_pt *) PAGE_TO_ADDR(l2_pt_old->l2_entries[v_l2] & PAGE_MASK);
@@ -126,7 +132,13 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 					p_page_t p_page = l1_pt_old->l1_entries[v_l1] & PAGE_MASK;
 
 					spinlock_acquire(&cm_spinlock);
+
 					cm_incref(p_page);
+					size_t refs = cm_getref(p_page);
+					if (refs <= NUM_CM_PIDS) {
+						set_pid8(p_page, retpid, refs - 1);
+					}
+
 					spinlock_release(&cm_spinlock);
 				}
 			}
@@ -176,7 +188,11 @@ as_destroy(struct addrspace *as)
 					if (cm_getref(p_page) > 1) {
 						cm_decref(p_page);
 					} else {
-						free_ppage(p_page);
+						if (in_ram(p_page)) {
+							free_ppage(p_page);
+						} else {
+							free_ppage_swap(p_page);
+						}
 					}
 
 					spinlock_release(&cm_spinlock);

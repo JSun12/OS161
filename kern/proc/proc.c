@@ -280,30 +280,39 @@ int
 proc_create_fork(const char *name, struct proc **new_proc)
 {
 	int ret;
+	struct proc *proc;
 
-	*new_proc = proc_create(name);
-	if (*new_proc == NULL) {
+	proc = proc_create(name);
+	if (proc == NULL) {
 		return ENOMEM;
 	}
 
-	ret = as_copy(curproc->p_addrspace, &(*new_proc)->p_addrspace);
+	ret = pidtable_add(proc, &proc->pid);
+	if (ret){
+		proc_destroy(proc);
+		return ret;
+	}
+
+	ret = as_copy(curproc->p_addrspace, &proc->p_addrspace, proc->pid);
 	if (ret) {
-		proc_destroy(*new_proc);
+		pidtable_freepid(proc->pid);
+		proc_destroy(proc);
 		return ret;
 	}
 
 	spinlock_acquire(&curproc->p_lock);
 	if (curproc->p_cwd != NULL) {
 		VOP_INCREF(curproc->p_cwd);
-		(*new_proc)->p_cwd = curproc->p_cwd;
+		proc->p_cwd = curproc->p_cwd;
 	}
 	spinlock_release(&curproc->p_lock);
 
 	struct ft *ft = curproc->proc_ft;
 	lock_acquire(ft->ft_lock);
-	ft_copy(ft, (*new_proc)->proc_ft);
+	ft_copy(ft, proc->proc_ft);
 	lock_release(ft->ft_lock);
 
+	*new_proc = proc;
 	return 0;
 }
 
@@ -427,6 +436,20 @@ clear_pid(pid_t pid)
 	pidtable->pid_procs[pid] = NULL;
 	pidtable->pid_status[pid] = READY;
 	pidtable->pid_waitcode[pid] = (int) NULL;
+}
+
+struct proc *
+get_pid(pid_t pid)
+{
+	KASSERT(pid >= PID_MIN && pid <= PID_MAX);
+
+	struct proc *proc;
+
+	lock_acquire(pidtable->pid_lock);
+	proc = pidtable->pid_procs[pid]; 
+	lock_release(pidtable->pid_lock);
+
+	return proc;	
 }
 
 /* Removes a given PID from the PID table. Used for failed forks. */

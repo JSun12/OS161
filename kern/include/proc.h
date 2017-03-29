@@ -87,6 +87,7 @@ struct pidtable {
 
 /* Initializes the pid table*/
 void pidtable_bootstrap(void);
+struct proc *get_pid(pid_t);
 int pidtable_add(struct proc *, int32_t *);
 void pidtable_exit(struct proc *, int32_t);
 void pidtable_freepid(pid_t);

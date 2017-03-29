@@ -29,11 +29,11 @@ static p_page_t first_page_swap; /* First physical page number that is allocated
 static p_page_t last_page_swap; /* One page past the last free physical page SWAP */
 
 // TODO: maybe this couting policy is ugly. If it works, clean it up by using proper types, etc.
-struct vnode *swap_disk;
-const char *swap_dir = "lhd0raw:";
+static struct vnode *swap_disk;
+static const char swap_dir[] = "lhd0raw:";
 
 static struct spinlock counter_spinlock = SPINLOCK_INITIALIZER;
-static volatile int swap_out_counter = 1;
+static volatile int swap_out_counter = 0;
 static volatile p_page_t swapclock;
 
 #define SWAP_OUT_COUNT    0x8
@@ -186,7 +186,7 @@ get_pid8(p_page_t p_page, uint32_t pos)
 void
 vm_bootstrap()
 {
-    paddr_t cm_paddr = ram_stealmem(2*COREMAP_PAGES);
+    paddr_t cm_paddr = ram_stealmem(COREMAP_PAGES);
     KASSERT(cm_paddr != 0);
 
     cm = (struct coremap *) PADDR_TO_KVADDR(cm_paddr);
@@ -206,7 +206,15 @@ void
 swap_bootstrap()
 {
     // TODO: this is probably not appropriate
-    vfs_open((char *) swap_dir, O_RDWR, 0, &swap_disk);
+    int ret; 
+    char dir[sizeof(swap_dir)];
+    strcpy(dir, swap_dir);
+
+    ret = vfs_open(dir, O_RDWR, 0, &swap_disk);
+    if (ret) {
+        panic("swap disk wasn't able to open\n");
+    }
+
     first_page_swap = last_page + 1; 
     last_page_swap = 1024;
 }
@@ -366,7 +374,7 @@ find_free_swap(p_page_t *p_page)
 {
     p_page_t page; 
     for (page = first_page_swap; page < last_page_swap; page++) {
-        if (p_page_used(page)) {
+        if (!p_page_used(page)) {
             *p_page = page;
             return 0; 
         }
@@ -402,7 +410,7 @@ swap_evict_uio(p_page_t p_page)
     u->uio_offset = swap_offset(p_page);
     u->uio_segflg = UIO_SYSSPACE;
     u->uio_rw = UIO_WRITE;
-    u->uio_space = curproc->p_addrspace;
+    u->uio_space = NULL;
 
     return u;
 }
@@ -425,7 +433,7 @@ swap_load_uio(p_page_t p_page, p_page_t old_p_page)
     u->uio_offset = swap_offset(old_p_page);
     u->uio_segflg = UIO_SYSSPACE;
     u->uio_rw = UIO_READ;
-    u->uio_space = curproc->p_addrspace;
+    u->uio_space = NULL;
 
     return u;
 }
@@ -511,12 +519,12 @@ swap_out()
                 return result;
             }
 
+            cm->cm_entries[swap_to_page] = cm->cm_entries[swapclock];
+            cm->pids8_entries[swap_to_page] = cm->pids8_entries[swapclock];
+
             struct uio *u = swap_evict_uio(swap_to_page);
             VOP_WRITE(swap_disk, u);
             swap_uio_cleanup(u);
-
-            cm->cm_entries[swap_to_page] = cm->cm_entries[swapclock];
-            cm->pids8_entries[swap_to_page] = cm->pids8_entries[swapclock];
 
             update_pt_entries(swap_to_page);
 
@@ -572,7 +580,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     spinlock_acquire(&counter_spinlock);
 
-    if (swap_out_counter == SWAP_OUT_COUNT - 1 && 0) {      
+    if (swap_out_counter == SWAP_OUT_COUNT - 1) {      
         swap_out_counter = 0;
         spinlock_release(&counter_spinlock);
         swap_out();

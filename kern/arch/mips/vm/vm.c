@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <spl.h>
 #include <proc.h>
+#include <wchan.h>
 #include <addrspace.h>
 #include <lib.h>
 #include <mips/tlb.h>
@@ -31,6 +32,12 @@ static p_page_t last_page_swap; /* One page past the last free physical page SWA
 // TODO: maybe this couting policy is ugly. If it works, clean it up by using proper types, etc.
 static struct vnode *swap_disk;
 static const char swap_dir[] = "lhd0raw:";
+
+// static struct cv *io_cv; 
+// static struct lock *io_lock; 
+
+static struct wchan *io_wc; 
+static bool io_flag;
 
 static struct spinlock counter_spinlock = SPINLOCK_INITIALIZER;
 static volatile int swap_out_counter = 0;
@@ -217,6 +224,9 @@ swap_bootstrap()
 
     first_page_swap = last_page + 1; 
     last_page_swap = 1024;
+
+    io_wc = wchan_create("io_wc");
+    io_flag = false;
 }
 
 vaddr_t
@@ -523,8 +533,18 @@ swap_out()
             cm->pids8_entries[swap_to_page] = cm->pids8_entries[swapclock];
 
             struct uio *u = swap_evict_uio(swap_to_page);
+
+            io_flag = true;
+            spinlock_release(&cm_spinlock);
+            spinlock_release(&global);
+
             VOP_WRITE(swap_disk, u);
             swap_uio_cleanup(u);
+
+            spinlock_acquire(&global);
+            spinlock_acquire(&cm_spinlock);
+            io_flag = false;
+            wchan_wakeall(io_wc, &global);
 
             update_pt_entries(swap_to_page);
 
@@ -576,7 +596,12 @@ if not specified (that is, valid), assume readable and writable.
 int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
+
     spinlock_acquire(&global);
+
+    if (io_flag) {
+        wchan_sleep(io_wc, &global);
+    }
 
     spinlock_acquire(&counter_spinlock);
 
@@ -643,7 +668,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         if (faulttype == VM_FAULT_READONLY && !(l2_entry & ENTRY_WRITABLE)) {
             v_page_t v_page = l2_entry & PAGE_MASK;
             p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
-            KASSERT(in_all_memory(p_page));
+            KASSERT(in_ram(p_page));
 
             spinlock_acquire(&cm_spinlock);
 
@@ -684,6 +709,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             spinlock_release(&cm_spinlock);
         } else {
             v_page_t v_page = l2_entry & PAGE_MASK;
+            KASSERT(in_ram(KVPAGE_TO_PPAGE(v_page)));
             l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);
         }
     } else {
@@ -738,6 +764,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         if (faulttype == VM_FAULT_READONLY && !(l1_entry & ENTRY_WRITABLE)) {
             p_page_t old_page = l1_entry & PAGE_MASK;
             KASSERT(in_all_memory(old_page));
+            KASSERT(in_ram(old_page)); // used as a test (this shouldn't be here)
 
             spinlock_acquire(&cm_spinlock);
 
@@ -780,7 +807,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                         | p_page;
             } else {
                 l1_pt->l1_entries[v_l1] = l1_pt->l1_entries[v_l1] | ENTRY_WRITABLE;
-                p_page_t old_page = l1_pt->l1_entries[v_l1] & PAGE_MASK;
 
                 if (in_swap(old_page)) {
                     p_page = first_alloc_page;
@@ -818,10 +844,12 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             spinlock_release(&cm_spinlock);
         } else {
             p_page_t old_page = l1_pt->l1_entries[v_l1] & PAGE_MASK;
+            KASSERT(in_all_memory(old_page));
+            KASSERT(in_ram(old_page)); // used as a test (this should be here)
 
             spinlock_acquire(&cm_spinlock);
 
-            if (first_page_swap <= old_page && old_page < last_page_swap) {
+            if (in_swap(old_page)) {
                 p_page = first_alloc_page;
                 result = find_free(1, &p_page);
                 if (result) {

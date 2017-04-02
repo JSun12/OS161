@@ -191,7 +191,7 @@ proc_destroy(struct proc *proc)
 			as = proc->p_addrspace;
 			proc->p_addrspace = NULL;
 		}
-		as_destroy(as);
+		as_destroy(as, proc->pid);
 	}
 
 	ft_destroy(proc->proc_ft);

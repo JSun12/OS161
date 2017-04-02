@@ -113,7 +113,7 @@ struct addrspace *as_create(void);
 int               as_copy(struct addrspace *src, struct addrspace **ret, pid_t retpid);
 void              as_activate(void);
 void              as_deactivate(void);
-void              as_destroy(struct addrspace *);
+void              as_destroy(struct addrspace *, pid_t pid);
 
 int               as_define_region(struct addrspace *as,
                                    vaddr_t vaddr, size_t sz,

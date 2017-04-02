@@ -1045,7 +1045,9 @@ wchan_sleep(struct wchan *wc, struct spinlock *lk)
 	KASSERT(spinlock_do_i_hold(lk));
 
 	/* must not hold other spinlocks */
-	KASSERT(curcpu->c_spinlocks == 1);
+	if (!(curcpu->c_spinlocks == 1)) {
+		KASSERT(curcpu->c_spinlocks == 1);
+	}
 
 	thread_switch(S_SLEEP, wc, lk);
 	spinlock_acquire(lk);

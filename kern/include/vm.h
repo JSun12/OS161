@@ -85,6 +85,7 @@ TODO: use in_ram and in_swap for the KASSERTS and other places.
 #define VP_MASK              0x000fffff    /* Mask to extract the virtual page of the page frame */
 
 #define NUM_CM_PIDS          4
+#define MAX_CM_PID           256
 #define PID8_1               0x000000ff
 #define PID8_2               0x0000ff00
 #define PID8_3               0x00ff0000
@@ -206,6 +207,8 @@ void cm_decref(p_page_t);
 
 void set_pid8(p_page_t, pid_t, uint32_t);
 pid_t get_pid8(p_page_t, uint32_t);
+void add_pid8(p_page_t, pid_t);
+void rem_pid8(p_page_t, pid_t);
 
 /* Initialization function */
 void vm_bootstrap(void);
@@ -213,6 +216,7 @@ void swap_bootstrap(void);
 
 /* Swapping */
 int swap_out(void);
+int swap_out_test(p_page_t *, p_page_t *);
 int swap_in(p_page_t, p_page_t);
 
 /* Fault handling function called by trap code */

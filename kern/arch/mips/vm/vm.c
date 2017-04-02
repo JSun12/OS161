@@ -33,18 +33,26 @@ static p_page_t last_page_swap; /* One page past the last free physical page SWA
 static struct vnode *swap_disk;
 static const char swap_dir[] = "lhd0raw:";
 
+// test
+static char content[0x1000];
+static cm_entry_t old_mem; 
+// static l1_entry_t l1[4];
+static bool check = false;
+
 // static struct cv *io_cv; 
 // static struct lock *io_lock; 
 
-static struct wchan *io_wc; 
-static bool io_flag;
+struct wchan *io_wc; 
+volatile bool io_flag;
 
 static struct spinlock counter_spinlock = SPINLOCK_INITIALIZER;
 static volatile int swap_out_counter = 0;
 static volatile p_page_t swapclock;
 
-#define SWAP_OUT_COUNT    0x8
+#define SWAP_OUT_COUNT    0x1
 #define NUM_FREE_PPAGES   8
+
+// PASSING MATMULT!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 /////////////////////////////////////////////////////////////////////////////////////////
 bool
@@ -123,6 +131,7 @@ free_ppage(p_page_t p_page)
     KASSERT(in_ram(p_page));
 
     cm->cm_entries[p_page] = 0;
+    cm->pids8_entries[p_page] = 0;
     cm_counter--;
 }
 
@@ -132,6 +141,7 @@ free_ppage_swap(p_page_t p_page)
     KASSERT(in_swap(p_page));
 
     cm->cm_entries[p_page] = 0; 
+    cm->pids8_entries[p_page] = 0;
 }
 
 size_t
@@ -171,7 +181,7 @@ set_pid8(p_page_t p_page, pid_t pid, uint32_t pos)
 
     pid_t pid_to_add = 0;
 
-    if (pid < 256) {
+    if (pid < MAX_CM_PID) {
         pid_to_add = pid;
     }
 
@@ -188,6 +198,52 @@ get_pid8(p_page_t p_page, uint32_t pos)
     return (cm->pids8_entries[p_page] & (0x000000ff << pos*8)) >> pos*8;
 }
 
+void
+add_pid8(p_page_t p_page, pid_t pid)
+{
+    KASSERT(in_all_memory(p_page)); 
+
+    if (!(pid < MAX_CM_PID)) {
+        return; 
+    }    
+
+    for (uint32_t pos = 0; pos < NUM_CM_PIDS; pos++) {
+        if (get_pid8(p_page, pos) == 0) {
+            set_pid8(p_page, pid, pos);
+            return;
+        }
+    }
+
+    return;
+}
+
+void
+rem_pid8(p_page_t p_page, pid_t pid)
+{
+    KASSERT(in_all_memory(p_page));
+
+    if (!(pid < MAX_CM_PID)) {
+        return;
+    }
+
+    uint32_t pos = 0; 
+    while (pos < NUM_CM_PIDS) {
+        pid_t cur_pid = get_pid8(p_page, pos); 
+        if (cur_pid == pid) {
+            set_pid8(p_page, 0, pos);
+            break;
+        }
+        pos++;
+    }
+
+    while (pos < NUM_CM_PIDS - 1) {
+        set_pid8(p_page, get_pid8(p_page, pos + 1), pos);
+        set_pid8(p_page, 0, pos + 1);
+        pos++;
+    }
+
+    return;
+}
 ////////////////////////////////////////////////////////////////////////////////////
 
 void
@@ -222,8 +278,8 @@ swap_bootstrap()
         panic("swap disk wasn't able to open\n");
     }
 
-    first_page_swap = last_page + 1; 
-    last_page_swap = 1024;
+    first_page_swap = last_page; 
+    last_page_swap = 0x400;
 
     io_wc = wchan_create("io_wc");
     io_flag = false;
@@ -368,6 +424,7 @@ entry_recently_used(p_page_t p_page)
 	for (index = 0; index < NUM_TLB; index++) {
 		tlb_read(&entryhi, &entrylo, index);
         if (p_page == ((entrylo & TLBLO_PPAGE) >> 12)) {
+            splx(spl);
             return true;
         }
 	}
@@ -464,10 +521,20 @@ update_pt_entries(p_page_t swap_to_page)
 
     for (uint32_t pos = 0; pos < refs; pos++) {
         pid_t pid = get_pid8(swap_to_page, pos);
-        
+        KASSERT(pid != 0);
+
+        io_flag = true;
+        spinlock_release(&cm_spinlock);
+        spinlock_release(&global);
+
         struct proc *proc = get_pid(pid);
         KASSERT(proc != NULL); 
 
+        spinlock_acquire(&global);
+        spinlock_acquire(&cm_spinlock);
+        io_flag = false;
+        wchan_wakeall(io_wc, &global);
+        
         struct addrspace *as = proc->p_addrspace; 
         KASSERT(as != NULL); 
 
@@ -483,8 +550,21 @@ update_pt_entries(p_page_t swap_to_page)
         
         struct l1_pt *l1_pt = (struct l1_pt *) PAGE_TO_ADDR(l2_entry & PAGE_MASK);
 
+        // if(!check) {
+        //     l1[pos] = l1_pt->l1_entries[v_l1];
+        //     if ((l1_pt->l1_entries[v_l1] & PAGE_MASK) != swapclock){
+        //         // KASSERT((l1_pt->l1_entries[v_l1] & PAGE_MASK) == swapclock);
+        //     }
+        // }
+
         l1_pt->l1_entries[v_l1] = l1_pt->l1_entries[v_l1] & (~PAGE_MASK);   
-        l1_pt->l1_entries[v_l1] = l1_pt->l1_entries[v_l1] & swap_to_page;   
+        l1_pt->l1_entries[v_l1] = l1_pt->l1_entries[v_l1] | swap_to_page;
+        
+        // if (check) {
+        //     if (!(l1[pos] == l1_pt->l1_entries[v_l1])) {
+        //         // KASSERT(l1[pos] == l1_pt->l1_entries[v_l1]);
+        //     }
+        // }
     }
 }
 
@@ -568,16 +648,110 @@ swap_out()
 }
 
 int
+swap_out_test(p_page_t *mem_page, p_page_t *swap_page)
+{
+    // size_t free_pages = last_page - cm_counter;
+
+    // if (free_pages >= NUM_FREE_PPAGES) {
+    //     return -1; 
+    // }
+
+
+    p_page_t first_clock = swapclock;
+    int cycles = 0; 
+    int result;
+
+    spinlock_acquire(&cm_spinlock);
+
+    // We iterate for 2 cycles, since after the first cycle, the reference bits are cleared
+    while (cycles < 2) {
+        if (entry_swappable(swapclock) && !entry_recently_used(swapclock)) {
+            p_page_t swap_to_page; 
+
+            result = find_free_swap(&swap_to_page);
+            if (result) {
+                spinlock_release(&cm_spinlock);
+                return result;
+            }
+
+            old_mem = cm->cm_entries[swapclock];            
+
+            cm->cm_entries[swap_to_page] = cm->cm_entries[swapclock];
+            cm->pids8_entries[swap_to_page] = cm->pids8_entries[swapclock];
+
+            const void *src = (const void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(swapclock));
+            void *dst = (void *) &content;
+            memmove(dst, src, (size_t) PAGE_SIZE);
+
+            struct uio *u = swap_evict_uio(swap_to_page);
+
+            io_flag = true;
+            spinlock_release(&cm_spinlock);
+            spinlock_release(&global);
+
+            VOP_WRITE(swap_disk, u);
+            swap_uio_cleanup(u);
+
+            spinlock_acquire(&global);
+            spinlock_acquire(&cm_spinlock);
+            io_flag = false;
+            wchan_wakeall(io_wc, &global);
+
+            KASSERT(cm->cm_entries[swap_to_page] == cm->cm_entries[swapclock]);
+            KASSERT(cm->pids8_entries[swap_to_page] == cm->pids8_entries[swapclock]);
+
+            update_pt_entries(swap_to_page);
+
+            // free_ppage(swapclock);
+            *mem_page = swapclock;
+            *swap_page = swap_to_page;
+
+            spinlock_release(&cm_spinlock);
+            return 0;
+        }
+
+        cm->cm_entries[swapclock] = cm->cm_entries[swapclock] & (~REF_BIT);
+
+        swapclock_tick(); 
+        if (swapclock == first_clock) {
+            cycles++;
+        }
+    }
+
+    spinlock_release(&cm_spinlock);
+
+    return -1;
+}
+
+// add any error codes
+int
 swap_in(p_page_t p_page, p_page_t old_p_page)
 {
-    KASSERT(!(cm->cm_entries[p_page] & ENTRY_VALID));
+    KASSERT(cm->cm_entries[p_page] & PP_USED);
+    KASSERT(cm->cm_entries[old_p_page] & PP_USED);
     KASSERT(in_ram(p_page));
-    KASSERT(cm->cm_entries[old_p_page] & ENTRY_VALID);
     KASSERT(in_swap(old_p_page));
 
     struct uio *u = swap_load_uio(p_page, old_p_page);
+
+    io_flag = true;
+    spinlock_release(&cm_spinlock);
+    spinlock_release(&global);
+
     VOP_READ(swap_disk, u);
     swap_uio_cleanup(u);
+
+    spinlock_acquire(&global);
+    spinlock_acquire(&cm_spinlock);
+    io_flag = false;
+    wchan_wakeall(io_wc, &global);
+
+    // for (unsigned i = 0; i < PAGE_SIZE; i++) {
+    //     char *ptr = (char *) (PAGE_TO_ADDR(PPAGE_TO_KVPAGE(p_page)) + i);
+    //     if (*ptr != content[i]) {
+    //         KASSERT(*ptr == content[i]);
+    //     }
+    // }
 
     return 0; 
 }
@@ -598,10 +772,11 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 {
 
     spinlock_acquire(&global);
-
-    if (io_flag) {
+    while (io_flag) {
         wchan_sleep(io_wc, &global);
     }
+
+    KASSERT(io_flag == false);
 
     spinlock_acquire(&counter_spinlock);
 
@@ -614,24 +789,39 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         spinlock_release(&counter_spinlock);
     }
 
-    // spinlock_acquire(&counter_spinlock);
+    /*
+    we have to adjust amount of swap depending on amount of ram (hard coded for now);
+    */
 
-    // if ((swap_out_counter % SWAP_OUT_COUNT) == 0) {
-    //     kprintf("Pages used: %x, PID: %d, faultaddress: %x, type: %d\n", cm_counter, curproc->pid, faultaddress, faulttype);
-    //     kprintf("%x\n", swap_out_counter);
-    // }
+    if (0) {
+    spinlock_acquire(&counter_spinlock);
 
+    if (swap_out_counter == SWAP_OUT_COUNT - 1) {      
+        swap_out_counter = 0;
+        spinlock_release(&counter_spinlock);
+        p_page_t mem_page; 
+        p_page_t swap_page;
+        check = false;
+        int ret = swap_out_test(&mem_page, &swap_page);
 
+        if (ret == 0) {
+            spinlock_acquire(&cm_spinlock);
+            KASSERT(cm->cm_entries[mem_page] == cm->cm_entries[swap_page]);
+            KASSERT(cm->pids8_entries[mem_page] == cm->pids8_entries[swap_page]);
 
-    // // if (swap_out_counter == SWAP_OUT_COUNT - 1) {
-    // //     swap_out_counter = 0;
-    // // } else {
-    // //     swap_out_counter++;
-    // // }
+            check = true;
+            swap_in(mem_page, swap_page);
+            update_pt_entries(mem_page);
+            free_ppage_swap(swap_page);
 
-    // spinlock_release(&counter_spinlock);
-
-
+            KASSERT(cm->cm_entries[mem_page] == old_mem);
+            spinlock_release(&cm_spinlock);
+        }
+    } else {
+        swap_out_counter++;
+        spinlock_release(&counter_spinlock);
+    }
+    }
 
     struct addrspace *as = curproc->p_addrspace;
     pid_t pid = curproc->pid;
@@ -648,8 +838,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     v_page_l2_t v_l2 = L2_PNUM(fault_page);
     v_page_l1_t v_l1 = L1_PNUM(fault_page);
 
-    // lock_acquire(as->as_lock);
-
     struct l2_pt *l2_pt = as->l2_pt;
     l2_entry_t l2_entry = l2_pt->l2_entries[v_l2];
 
@@ -657,14 +845,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     // Get the l1 page table.
     if (l2_entry & ENTRY_VALID) {
-
-    // spinlock_acquire(&counter_spinlock);
-
-    // if ((swap_out_counter % SWAP_OUT_COUNT) == 0) {
-    //     kprintf("L2 VALID here: %x\n", l2_entry);
-    // }
-
-    // spinlock_release(&counter_spinlock);
         if (faulttype == VM_FAULT_READONLY && !(l2_entry & ENTRY_WRITABLE)) {
             v_page_t v_page = l2_entry & PAGE_MASK;
             p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
@@ -676,9 +856,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 result = l1_create(&l1_pt);
                 if (result) {
                     spinlock_release(&cm_spinlock);
-                    // lock_release(as->as_lock);
                     spinlock_release(&global);
-                    // kprintf("out of memory l1 creation\n");
                     return result;
                 }
 
@@ -695,12 +873,10 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                         | ENTRY_WRITABLE
                                         | ADDR_TO_PAGE((vaddr_t) l1_pt);
                 cm_incref(new_p_page);
-                size_t refs = cm_getref(new_p_page);
-                if (refs <= NUM_CM_PIDS) {
-                    set_pid8(new_p_page, pid, refs - 1);
-                }
+                add_pid8(new_p_page, pid);
 
                 cm_decref(p_page);
+                rem_pid8(p_page, pid);
             } else {
                 l2_pt->l2_entries[v_l2] = l2_pt->l2_entries[v_l2] | ENTRY_WRITABLE;
                 l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);
@@ -713,18 +889,9 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);
         }
     } else {
-    // spinlock_acquire(&counter_spinlock);
-
-    // if ((swap_out_counter % SWAP_OUT_COUNT) == 0) {
-    //     kprintf("L2 INVALID here: %x\n", l2_entry);
-    // }
-
-    // spinlock_release(&counter_spinlock);
         result = l1_create(&l1_pt);
         if (result) {
-            // lock_release(as->as_lock);
             spinlock_release(&global);
-            // kprintf("out of memory l1 creation\n");
             return result;
         }
 
@@ -740,10 +907,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
 
         cm_incref(p_page);
-        size_t refs = cm_getref(p_page);
-        if (refs <= NUM_CM_PIDS) {
-            set_pid8(p_page, pid, refs - 1);
-        }
+        add_pid8(p_page, pid);
 
         spinlock_release(&cm_spinlock);
     }
@@ -753,17 +917,10 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     // Get the faulting address' physical address
     if (l1_entry & ENTRY_VALID) {
-
-    // spinlock_acquire(&counter_spinlock);
-
-    // if ((swap_out_counter % SWAP_OUT_COUNT) == 0) {
-    //     kprintf("L1 VALID here: %x\n", l1_entry);
-    // }
-
-    // spinlock_release(&counter_spinlock);
         if (faulttype == VM_FAULT_READONLY && !(l1_entry & ENTRY_WRITABLE)) {
             p_page_t old_page = l1_entry & PAGE_MASK;
             KASSERT(in_all_memory(old_page));
+            KASSERT((cm->cm_entries[old_page] & PAGE_MASK) == ADDR_TO_PAGE(fault_page));
             KASSERT(in_ram(old_page)); // used as a test (this shouldn't be here)
 
             spinlock_acquire(&cm_spinlock);
@@ -774,7 +931,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 result = find_free(1, &p_page);
                 if (result) {
                     spinlock_release(&cm_spinlock);
-                    // lock_release(as->as_lock);
                     spinlock_release(&global);
                     return result;
                 }
@@ -784,21 +940,15 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                        | PP_USED
                                        | ADDR_TO_PAGE(fault_page);
                 cm_incref(p_page);
-                size_t refs = cm_getref(p_page);
-                if (refs <= NUM_CM_PIDS) {
-                    set_pid8(p_page, pid, refs - 1);
-                }
+                add_pid8(p_page, pid);
 
                 cm_decref(old_page);
+                rem_pid8(old_page, pid);
 
-                if (in_swap(old_page)) {
-                    swap_in(p_page, old_page);
-                } else {
-                    // TODO: get rid of this dirty hack
-                    const void *src = (const void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(old_page));
-                    void *dst = (void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(p_page));
-                    memmove(dst, src, (size_t) PAGE_SIZE);
-                }
+                // TODO: get rid of this dirty hack
+                const void *src = (const void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(old_page));
+                void *dst = (void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(p_page));
+                memmove(dst, src, (size_t) PAGE_SIZE);
 
                 l1_pt->l1_entries[v_l1] = 0
                                         | ENTRY_VALID
@@ -807,76 +957,33 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                         | p_page;
             } else {
                 l1_pt->l1_entries[v_l1] = l1_pt->l1_entries[v_l1] | ENTRY_WRITABLE;
-
-                if (in_swap(old_page)) {
-                    p_page = first_alloc_page;
-                    result = find_free(1, &p_page);
-                    if (result) {
-                        spinlock_release(&cm_spinlock);
-                        // lock_release(as->as_lock);
-                        spinlock_release(&global);
-                        return result;
-                    }
-
-                    cm_counter++;
-                    cm->cm_entries[p_page] = 0
-                                            | PP_USED
-                                            | ADDR_TO_PAGE(fault_page);
-
-                    l1_pt->l1_entries[v_l1] = 0
-                                            | ENTRY_VALID
-                                            | ENTRY_READABLE
-                                            | ENTRY_WRITABLE
-                                            | p_page;
-                    cm_incref(p_page);
-                    size_t refs = cm_getref(p_page);
-                    if (refs <= NUM_CM_PIDS) {
-                        set_pid8(p_page, pid, refs - 1);
-                    }        
-                
-                    swap_in(p_page, old_page);
-                    free_ppage_swap(old_page);                 
-                } else {
-                    p_page = old_page;
-                }
+                p_page = old_page;
             }
 
             spinlock_release(&cm_spinlock);
         } else {
             p_page_t old_page = l1_pt->l1_entries[v_l1] & PAGE_MASK;
             KASSERT(in_all_memory(old_page));
-            KASSERT(in_ram(old_page)); // used as a test (this should be here)
+            KASSERT((cm->cm_entries[old_page] & PAGE_MASK) == ADDR_TO_PAGE(fault_page));
 
             spinlock_acquire(&cm_spinlock);
 
+            // must swap in and update pt entries 
             if (in_swap(old_page)) {
                 p_page = first_alloc_page;
                 result = find_free(1, &p_page);
                 if (result) {
                     spinlock_release(&cm_spinlock);
-                    // lock_release(as->as_lock);
                     spinlock_release(&global);
                     return result;
                 }
 
                 cm_counter++;
-                cm->cm_entries[p_page] = 0
-                                        | PP_USED
-                                        | ADDR_TO_PAGE(fault_page);
-
-                l1_pt->l1_entries[v_l1] = 0
-                                        | ENTRY_VALID
-                                        | ENTRY_READABLE
-                                        | ENTRY_WRITABLE
-                                        | p_page;
-                cm_incref(p_page);
-                size_t refs = cm_getref(p_page);
-                if (refs <= NUM_CM_PIDS) {
-                    set_pid8(p_page, pid, refs - 1);
-                }        
-            
+                cm->cm_entries[p_page] = cm->cm_entries[old_page];
+                cm->pids8_entries[p_page] = cm->pids8_entries[old_page];
                 swap_in(p_page, old_page);
-                free_ppage_swap(old_page);                 
+                update_pt_entries(p_page);
+                free_ppage_swap(old_page);
             } else {
                 p_page = old_page;
             }
@@ -884,21 +991,12 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             spinlock_release(&cm_spinlock);
         }
     } else {
-
-    // spinlock_acquire(&counter_spinlock);
-
-    // if ((swap_out_counter % SWAP_OUT_COUNT) == 0) {
-    //     kprintf("L1 INVALID here: %x\n", l1_entry);
-    // }
-
-    // spinlock_release(&counter_spinlock);
         spinlock_acquire(&cm_spinlock);
 
         p_page = first_alloc_page;
         result = find_free(1, &p_page);
         if (result) {
             spinlock_release(&cm_spinlock);
-            // lock_release(as->as_lock);
             spinlock_release(&global);
             return result;
         }
@@ -914,10 +1012,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                 | ENTRY_WRITABLE
                                 | p_page;
         cm_incref(p_page);
-        size_t refs = cm_getref(p_page);
-        if (refs <= NUM_CM_PIDS) {
-            set_pid8(p_page, pid, refs - 1);
-        }        
+        add_pid8(p_page, pid);     
 
         spinlock_release(&cm_spinlock);
     }
@@ -936,17 +1031,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     } else {
         entrylo = 0 | p_page_high | TLBLO_VALID;
     }
-
-    // spinlock_acquire(&counter_spinlock);
-
-    // if ((swap_out_counter % SWAP_OUT_COUNT) == 0) {
-    //     kprintf("Entryhi: %x\n", entryhi);
-    //     kprintf("Entrylo: %x\n", entrylo);
-    //     kprintf("TLB index: %x\n", V_TO_INDEX(fault_page));
-    // }
-
-    // spinlock_release(&counter_spinlock);
-
 
     // pretty ugly tlb eviction. oh well. this is needed for matmult to work. otherwise, we get thrashing
     int spl = splhigh();
@@ -971,15 +1055,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     splx(spl);
 
-    // lock_release(as->as_lock);
     spinlock_release(&global);
-
-    // spinlock_acquire(&counter_spinlock);
-    // // if (swap_out_counter < 0x300){
-    //     // swap_out_counter++;
-    // // }
-    // spinlock_release(&counter_spinlock);
-
     return 0;
 }
 

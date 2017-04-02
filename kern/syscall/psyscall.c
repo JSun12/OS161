@@ -376,7 +376,7 @@ sys_execv(const char *prog, char **args)
 	ret = load_elf(v, &entrypoint);
 	if (ret) {
 		switch_addrspace(as_old);
-		as_destroy(as_new);
+		as_destroy(as_new, curproc->pid);
 		vfs_close(v);
 		kfree(progname);
 		free_copied_in_args(argc, size, args_in);
@@ -386,14 +386,14 @@ sys_execv(const char *prog, char **args)
 	ret = as_define_stack(as_new, &stackptr);
 	if (ret) {
 		switch_addrspace(as_old);
-		as_destroy(as_new);
+		as_destroy(as_new, curproc->pid);
 		vfs_close(v);
 		kfree(progname);
 		free_copied_in_args(argc, size, args_in);
 		return ret;
 	}
 
-	as_destroy(as_old);
+	as_destroy(as_old, curproc->pid);
 	vfs_close(v);
 
 	userptr_t args_out_addr;

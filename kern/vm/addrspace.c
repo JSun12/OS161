@@ -6,6 +6,7 @@
 #include <proc.h>
 #include <spl.h>
 #include <mips/tlb.h>
+#include <wchan.h>
 
 /*
  * Note! If OPT_DUMBVM is set, as is the case until you start the VM
@@ -17,6 +18,9 @@ extern struct spinlock global;
 
 extern struct cm *cm;
 extern struct spinlock cm_spinlock;
+
+extern struct wchan *io_wc; 
+extern bool io_flag;
 
 int
 l1_create(struct l1_pt **l1_pt)
@@ -92,7 +96,7 @@ as_create(void)
 }
 
 int
-as_copy(struct addrspace *old, struct addrspace **ret, pid_t retpid)
+as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 {
 	struct addrspace *newas;
 
@@ -101,7 +105,14 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t retpid)
 		return ENOMEM;
 	}
 
-	spinlock_acquire(&global);
+    spinlock_acquire(&global);
+
+    while (io_flag) {
+        wchan_sleep(io_wc, &global);
+    }
+
+	KASSERT(io_flag == false);
+
 	// lock_acquire(old->as_lock);
 
 	struct l2_pt *l2_pt_new = newas->l2_pt;
@@ -116,10 +127,7 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t retpid)
 			spinlock_acquire(&cm_spinlock);
 
 			cm_incref(p_page1); // TODO: maybe change this name p_page1
-			size_t refs = cm_getref(p_page1);
-			if (refs <= NUM_CM_PIDS) {
-				set_pid8(p_page1, retpid, refs - 1);
-			}
+			add_pid8(p_page1, pid);
 				
 			spinlock_release(&cm_spinlock);
 
@@ -134,10 +142,7 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t retpid)
 					spinlock_acquire(&cm_spinlock);
 
 					cm_incref(p_page);
-					size_t refs = cm_getref(p_page);
-					if (refs <= NUM_CM_PIDS) {
-						set_pid8(p_page, retpid, refs - 1);
-					}
+					add_pid8(p_page, pid);
 
 					spinlock_release(&cm_spinlock);
 				}
@@ -165,9 +170,15 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t retpid)
 }
 
 void
-as_destroy(struct addrspace *as)
+as_destroy(struct addrspace *as, pid_t pid)
 {
-	spinlock_acquire(&global);
+    spinlock_acquire(&global);
+    while (io_flag) {
+        wchan_sleep(io_wc, &global);
+    }
+
+    KASSERT(io_flag == false);
+
 	struct l2_pt *l2_pt = as->l2_pt;
 
 	for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
@@ -187,6 +198,7 @@ as_destroy(struct addrspace *as)
 
 					if (cm_getref(p_page) > 1) {
 						cm_decref(p_page);
+						rem_pid8(p_page, pid);
 					} else {
 						if (in_ram(p_page)) {
 							free_ppage(p_page);
@@ -205,6 +217,7 @@ as_destroy(struct addrspace *as)
 
 			if (cm_getref(p_page) > 1) {
 				cm_decref(p_page);
+				rem_pid8(p_page, pid);
 			} else {
 				kfree(l1_pt);
 			}
@@ -233,7 +246,7 @@ as_activate(void)
 		return;
 	}
 
-	spinlock_acquire(&global);
+    spinlock_acquire(&global);
 
 	tlb_invalidate();
 

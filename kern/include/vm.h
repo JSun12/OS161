@@ -59,9 +59,9 @@ the process when this happens).
 TODO: we need to implement tlb shootdown in order to use the vm on multiple
 processors.
 
-
-TODO: Make sure we can evict kernel pages. 
-TODO: use in_ram and in_swap for the KASSERTS and other places.
+TODO: In execv, we switch address spaces before destroying the old one. Thus, when pids8 in a cm entry
+points to a process which switched it's address space but haven't destroyed the old, we run into problems
+(such as with update_pt_entries)
 */
 
 
@@ -218,6 +218,7 @@ void swap_bootstrap(void);
 int swap_out(void);
 int swap_out_test(p_page_t *, p_page_t *);
 int swap_in(p_page_t, p_page_t);
+int swap_in_l1(p_page_t *);
 
 /* Fault handling function called by trap code */
 int vm_fault(int, vaddr_t);

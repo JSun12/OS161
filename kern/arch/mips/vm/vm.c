@@ -38,6 +38,7 @@ static char content[0x1000];
 static cm_entry_t old_mem; 
 // static l1_entry_t l1[4];
 static bool check = false;
+static volatile bool in = false;
 
 // static struct cv *io_cv; 
 // static struct lock *io_lock; 
@@ -374,6 +375,9 @@ vm_tlbshootdown(const struct tlbshootdown *tlbsd)
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////
+/*
+Swapable pages are user data pages and l1 page tables. 
+*/
 static
 bool
 entry_swappable(p_page_t p_page)
@@ -385,12 +389,16 @@ entry_swappable(p_page_t p_page)
     }
 
     // For now, we don't want to evict l1 page tables
-    if ((cm->cm_entries[p_page] & PAGE_MASK) >= 0x00080000) {
-        return false;
-    }
+    // if ((cm->cm_entries[p_page] & PAGE_MASK) >= 0x00080000) {
+    //     return false;
+    // }
 
     size_t ref = cm_getref(p_page);
     if (ref > NUM_CM_PIDS) {
+        return false;
+    }
+
+    if (ref == 0) {
         return false;
     }
 
@@ -423,7 +431,7 @@ entry_recently_used(p_page_t p_page)
 
 	for (index = 0; index < NUM_TLB; index++) {
 		tlb_read(&entryhi, &entrylo, index);
-        if (p_page == ((entrylo & TLBLO_PPAGE) >> 12)) {
+        if (p_page == TLBADDR_TO_PAGE(entrylo & TLBLO_PPAGE)) {
             splx(spl);
             return true;
         }
@@ -513,11 +521,15 @@ swap_uio_cleanup(struct uio *u)
     kfree(u); 
 }
 
+// return a proper error
 static
 void
-update_pt_entries(p_page_t swap_to_page)
+update_pt_entries(p_page_t swap_to_page, p_page_t old_page)
 {
     size_t refs = cm_getref(swap_to_page);
+    v_page_t v_page = cm->cm_entries[swap_to_page] & VP_MASK;
+    bool is_l1 = v_page >= 0x00080000;
+    int result;
 
     for (uint32_t pos = 0; pos < refs; pos++) {
         pid_t pid = get_pid8(swap_to_page, pos);
@@ -540,15 +552,41 @@ update_pt_entries(p_page_t swap_to_page)
 
         struct l2_pt *l2_pt = as->l2_pt; 
 
-        v_page_t v_page = cm->cm_entries[swap_to_page] & VP_MASK;
+        if (is_l1) {
+            bool did = false;
+            for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
+                p_page_t cur_p_page = l2_pt->l2_entries[v_l2] & PAGE_MASK;
+                if (cur_p_page == old_page) {
+                    l2_pt->l2_entries[v_l2] = l2_pt->l2_entries[v_l2] & (~PAGE_MASK);
+                    l2_pt->l2_entries[v_l2] = l2_pt->l2_entries[v_l2] | swap_to_page;
+                    did = true;
+                    break;
+                }
+            }
+            
+            if (!did) {
+                KASSERT(did);
+            }
+            continue;
+        }
+
         v_page_l2_t v_l2 = L2_PNUM(PAGE_TO_ADDR(v_page)); 
         v_page_l1_t v_l1 = L1_PNUM(PAGE_TO_ADDR(v_page));
 
         l2_entry_t l2_entry = l2_pt->l2_entries[v_l2]; 
 
         KASSERT(l2_entry & ENTRY_VALID); 
+
+        p_page_t p_page = l2_entry & PAGE_MASK;
+
+        if (in_swap(p_page)) {
+            result = swap_in_l1(&p_page);
+            if (result) {
+                KASSERT(0);
+            }
+        }
         
-        struct l1_pt *l1_pt = (struct l1_pt *) PAGE_TO_ADDR(l2_entry & PAGE_MASK);
+        struct l1_pt *l1_pt = (struct l1_pt *) PADDR_TO_KVADDR(PAGE_TO_ADDR(p_page));
 
         // if(!check) {
         //     l1[pos] = l1_pt->l1_entries[v_l1];
@@ -626,11 +664,12 @@ swap_out()
             io_flag = false;
             wchan_wakeall(io_wc, &global);
 
-            update_pt_entries(swap_to_page);
+            update_pt_entries(swap_to_page, swapclock);
 
             free_ppage(swapclock);
 
             spinlock_release(&cm_spinlock);
+            swapclock_tick();
             return 0;
         }
 
@@ -700,13 +739,14 @@ swap_out_test(p_page_t *mem_page, p_page_t *swap_page)
             KASSERT(cm->cm_entries[swap_to_page] == cm->cm_entries[swapclock]);
             KASSERT(cm->pids8_entries[swap_to_page] == cm->pids8_entries[swapclock]);
 
-            update_pt_entries(swap_to_page);
+            update_pt_entries(swap_to_page, swapclock);
 
             // free_ppage(swapclock);
             *mem_page = swapclock;
             *swap_page = swap_to_page;
 
             spinlock_release(&cm_spinlock);
+            swapclock_tick();
             return 0;
         }
 
@@ -756,6 +796,33 @@ swap_in(p_page_t p_page, p_page_t old_p_page)
     return 0; 
 }
 
+int
+swap_in_l1(p_page_t *p_page_ptr) 
+{
+    p_page_t p_page = *p_page_ptr;
+    int result; 
+
+    p_page_t new_page = first_alloc_page;
+    result = find_free(1, &new_page);
+    if (result) {
+        KASSERT(0);
+        return result;
+    }
+
+    cm_counter++;
+    cm->cm_entries[new_page] = cm->cm_entries[p_page];
+    cm->pids8_entries[new_page] = cm->pids8_entries[p_page];
+    swap_in(new_page, p_page);
+    in = true;
+    update_pt_entries(new_page, p_page);
+    in = false;
+    free_ppage_swap(p_page);
+    
+    *p_page_ptr = new_page;
+
+    return 0;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -778,6 +845,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     KASSERT(io_flag == false);
 
+    if (1) {
     spinlock_acquire(&counter_spinlock);
 
     if (swap_out_counter == SWAP_OUT_COUNT - 1) {      
@@ -787,6 +855,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     } else {
         swap_out_counter++;
         spinlock_release(&counter_spinlock);
+    }
     }
 
     /*
@@ -811,7 +880,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
             check = true;
             swap_in(mem_page, swap_page);
-            update_pt_entries(mem_page);
+            update_pt_entries(mem_page, swap_page);
             free_ppage_swap(swap_page);
 
             KASSERT(cm->cm_entries[mem_page] == old_mem);
@@ -845,9 +914,25 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     // Get the l1 page table.
     if (l2_entry & ENTRY_VALID) {
+        p_page_t p_page = l2_entry & PAGE_MASK;
+
+        if (in_swap(p_page)) {
+            spinlock_acquire(&cm_spinlock);
+            result = swap_in_l1(&p_page);
+            if (result) {
+                spinlock_release(&cm_spinlock);
+                spinlock_release(&global);
+                return result;
+            }
+            spinlock_release(&cm_spinlock);            
+        }
+
+        v_page_t v_page = PPAGE_TO_KVPAGE(p_page);
+        vaddr_t vaddr = PAGE_TO_ADDR(v_page);
+        KASSERT(in_ram(p_page));
+
         if (faulttype == VM_FAULT_READONLY && !(l2_entry & ENTRY_WRITABLE)) {
-            v_page_t v_page = l2_entry & PAGE_MASK;
-            p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
+
             KASSERT(in_ram(p_page));
 
             spinlock_acquire(&cm_spinlock);
@@ -862,7 +947,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
                 p_page_t new_p_page = ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt));
 
-                struct l1_pt *l1_pt_orig = (struct l1_pt *) PAGE_TO_ADDR(v_page);
+                struct l1_pt *l1_pt_orig = (struct l1_pt *) vaddr;
                 for (v_page_l1_t l1_val = 0; l1_val < NUM_L1PT_ENTRIES; l1_val++) {
                     l1_pt->l1_entries[l1_val] = l1_pt_orig->l1_entries[l1_val];
                 }
@@ -871,7 +956,8 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                                         | ENTRY_VALID
                                         | ENTRY_READABLE
                                         | ENTRY_WRITABLE
-                                        | ADDR_TO_PAGE((vaddr_t) l1_pt);
+                                        | ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt));
+                                        
                 cm_incref(new_p_page);
                 add_pid8(new_p_page, pid);
 
@@ -879,14 +965,12 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 rem_pid8(p_page, pid);
             } else {
                 l2_pt->l2_entries[v_l2] = l2_pt->l2_entries[v_l2] | ENTRY_WRITABLE;
-                l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);
+                l1_pt = (struct l1_pt *) vaddr;
             }
 
             spinlock_release(&cm_spinlock);
         } else {
-            v_page_t v_page = l2_entry & PAGE_MASK;
-            KASSERT(in_ram(KVPAGE_TO_PPAGE(v_page)));
-            l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);
+            l1_pt = (struct l1_pt *) vaddr;
         }
     } else {
         result = l1_create(&l1_pt);
@@ -897,20 +981,21 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
         spinlock_acquire(&cm_spinlock);
 
-        v_page_t v_page = ADDR_TO_PAGE((vaddr_t) l1_pt);
+        p_page_t p_page = ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt));
         l2_pt->l2_entries[v_l2] = 0
                                 | ENTRY_VALID
                                 | ENTRY_READABLE
                                 | ENTRY_WRITABLE
-                                | v_page;
-
-        p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
+                                | p_page;
 
         cm_incref(p_page);
         add_pid8(p_page, pid);
 
         spinlock_release(&cm_spinlock);
     }
+
+    // p_page_t l1_p_page = ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt));
+    // cm->cm_entries[l1_p_page] = cm->cm_entries[l1_p_page] | REF_BIT;
 
     l1_entry_t l1_entry = l1_pt->l1_entries[v_l1];
     p_page_t p_page;
@@ -982,7 +1067,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 cm->cm_entries[p_page] = cm->cm_entries[old_page];
                 cm->pids8_entries[p_page] = cm->pids8_entries[old_page];
                 swap_in(p_page, old_page);
-                update_pt_entries(p_page);
+                update_pt_entries(p_page, old_page);
                 free_ppage_swap(old_page);
             } else {
                 p_page = old_page;

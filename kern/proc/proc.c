@@ -605,8 +605,9 @@ pidtable_exit(struct proc *proc, int32_t waitcode)
 	}
 	/* Case: Parent already exited. Reset the current pidtable spot for later use. */
 	else if(pidtable->pid_status[proc->pid] == ORPHAN){
-		clear_pid(proc->pid);
+		pid_t pid = proc->pid; 
 		proc_destroy(curproc);
+		clear_pid(pid);
 	}
 	else{
 		panic("Tried to remove a bad process.\n");

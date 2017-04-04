@@ -96,11 +96,10 @@ int tlb_probe(uint32_t entryhi, uint32_t entrylo);
 #define TLBLO_INVALID()        (0)
 #define TLB_VALID_BIT          0x00000200
 
-/*
-We determine the 6 bit tlb index by consider the 4 LSBs
-and 2 MSBs of the address virtual page number.
-*/
-#define V_TO_INDEX(vaddr)      ((((vaddr) & 0x60000000) >> 25) | (((vaddr) & 0x00003000) >> 12) | (((vaddr) & 0x00030000) >> 14))
+/* Determine TLB address from a page, and vise versa */
+#define PAGE_TO_TLBADDR(page)  ((page) << 12)
+#define TLBADDR_TO_PAGE(addr)  ((addr) >> 12)
+
 
 /*
  * Number of TLB entries in the processor.

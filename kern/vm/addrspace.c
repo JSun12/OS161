@@ -25,17 +25,19 @@ extern bool io_flag;
 int
 l1_create(struct l1_pt **l1_pt)
 {
-    *l1_pt = kmalloc(sizeof(struct l1_pt));
-    if (*l1_pt == NULL) {
+	struct l1_pt *l1_pt_new;
+    l1_pt_new = kmalloc(sizeof(struct l1_pt));
+    if (l1_pt_new == NULL) {
         return ENOMEM;
     }
 
-	KASSERT(((vaddr_t) *l1_pt) % PAGE_SIZE == 0);
+	KASSERT(((vaddr_t) l1_pt_new) % PAGE_SIZE == 0);
 
     for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
-        (*l1_pt)->l1_entries[v_l1] = 0;
+        l1_pt_new->l1_entries[v_l1] = 0;
 	}
 
+	*l1_pt = l1_pt_new;
     return 0;
 }
 
@@ -99,6 +101,7 @@ int
 as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 {
 	struct addrspace *newas;
+	int result;
 
 	newas = as_create();
 	if (newas==NULL) {
@@ -113,8 +116,6 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 
 	KASSERT(io_flag == false);
 
-	// lock_acquire(old->as_lock);
-
 	struct l2_pt *l2_pt_new = newas->l2_pt;
 	struct l2_pt *l2_pt_old = old->l2_pt;
 
@@ -122,7 +123,18 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 		l2_pt_old->l2_entries[v_l2] = l2_pt_old->l2_entries[v_l2] & (~ENTRY_WRITABLE);
 
 		if (l2_pt_old->l2_entries[v_l2] & ENTRY_VALID) {
-			p_page_t p_page1 = KVPAGE_TO_PPAGE(l2_pt_old->l2_entries[v_l2] & PAGE_MASK);
+			p_page_t p_page1 = l2_pt_old->l2_entries[v_l2] & PAGE_MASK;
+
+			if (in_swap(p_page1)) {
+				spinlock_acquire(&cm_spinlock);
+				result = swap_in_l1(&p_page1);
+				if (result) {
+					spinlock_release(&cm_spinlock);
+					spinlock_release(&global);
+					return result;
+				}
+				spinlock_release(&cm_spinlock);            
+			}
 
 			spinlock_acquire(&cm_spinlock);
 
@@ -131,7 +143,7 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 				
 			spinlock_release(&cm_spinlock);
 
-			struct l1_pt *l1_pt_old = (struct l1_pt *) PAGE_TO_ADDR(l2_pt_old->l2_entries[v_l2] & PAGE_MASK);
+			struct l1_pt *l1_pt_old = (struct l1_pt *) PADDR_TO_KVADDR(PAGE_TO_ADDR(l2_pt_old->l2_entries[v_l2] & PAGE_MASK));
 
 			for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
 				l1_pt_old->l1_entries[v_l1] = l1_pt_old->l1_entries[v_l1] & (~ENTRY_WRITABLE);
@@ -157,8 +169,6 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
     newas->brk = old->brk;
 	*ret = newas;
 
-	// lock_release(old->as_lock);
-
 	// TODO: change the dirty bits of the correct process, not just invalidate all tlb entries
 
 	// TODO: reduce code repetition (similar to as_activate)
@@ -180,13 +190,26 @@ as_destroy(struct addrspace *as, pid_t pid)
     KASSERT(io_flag == false);
 
 	struct l2_pt *l2_pt = as->l2_pt;
+	int result;
 
 	for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
 		l2_entry_t l2_entry = l2_pt->l2_entries[v_l2];
 
 		if (l2_entry & ENTRY_VALID) {
-			v_page_t v_page_l1 = l2_entry & PAGE_MASK;
-			struct l1_pt *l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page_l1);
+			p_page_t p_page1 = l2_entry & PAGE_MASK;
+
+			if (in_swap(p_page1)) {
+				spinlock_acquire(&cm_spinlock);
+				result = swap_in_l1(&p_page1);
+				if (result) {
+					spinlock_release(&cm_spinlock);
+					spinlock_release(&global);
+					return;
+				}
+				spinlock_release(&cm_spinlock);            
+			}
+
+			struct l1_pt *l1_pt = (struct l1_pt *) PADDR_TO_KVADDR(PAGE_TO_ADDR(p_page1));
 
 			for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
 				l1_entry_t l1_entry = l1_pt->l1_entries[v_l1];
@@ -211,13 +234,11 @@ as_destroy(struct addrspace *as, pid_t pid)
 				}
 			}
 
-			p_page_t p_page = KVPAGE_TO_PPAGE(v_page_l1);
-
 			spinlock_acquire(&cm_spinlock);
 
-			if (cm_getref(p_page) > 1) {
-				cm_decref(p_page);
-				rem_pid8(p_page, pid);
+			if (cm_getref(p_page1) > 1) {
+				cm_decref(p_page1);
+				rem_pid8(p_page1, pid);
 			} else {
 				kfree(l1_pt);
 			}

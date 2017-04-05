@@ -62,6 +62,14 @@ processors.
 TODO: In execv, we switch address spaces before destroying the old one. Thus, when pids8 in a cm entry
 points to a process which switched it's address space but haven't destroyed the old, we run into problems
 (such as with update_pt_entries)
+
+CHANGES MADE TO PROCESS SYSCALLS: clear_pid must be called only after proc_destroy.
+
+KASSERT the properties that as_destroy needs of the process (pid, and all) in order to do it's job properly.
+
+Proper pidtable logic. Note that proc.c proc_destroy was temporarilty modified. Also, execv the address space is
+destroyed before switching. ALso, pid table implementations destory the proc before clearing the pid.
+TODO: acquire locks in update_pt_entries. namely pid lock and proc lock.
 */
 
 
@@ -110,6 +118,12 @@ points to a process which switched it's address space but haven't destroyed the 
 #define ENTRY_READABLE       0x10000000
 #define ENTRY_WRITABLE       0x08000000
 #define ENTRY_EXECUTABLE     0x04000000
+
+/* Private error codes, used only within the virtual memory system */
+#define SWAPNOMEM      1     /* No swap memory left while paging */
+#define ENOUGHFREE     2     /* Enough free physical pages; no need to swap out */
+#define NOSWAPPABLE    3     /* No entries in the coremap are swappable */
+
 
 /*
 The coremap supports 16MB of physical RAM, since cm_entry_t is a 4 bytes,
@@ -219,6 +233,7 @@ int swap_out(void);
 int swap_out_test(p_page_t *, p_page_t *);
 int swap_in(p_page_t, p_page_t);
 int swap_in_l1(p_page_t *);
+void paging_daemon(void *, unsigned long);
 
 /* Fault handling function called by trap code */
 int vm_fault(int, vaddr_t);

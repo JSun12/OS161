@@ -371,6 +371,7 @@ sys_execv(const char *prog, char **args)
 		return ENOMEM;
 	}
 
+	as_destroy(as_old, curproc->pid);
 	switch_addrspace(as_new);
 
 	ret = load_elf(v, &entrypoint);
@@ -393,7 +394,6 @@ sys_execv(const char *prog, char **args)
 		return ret;
 	}
 
-	as_destroy(as_old, curproc->pid);
 	vfs_close(v);
 
 	userptr_t args_out_addr;

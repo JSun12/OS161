@@ -154,7 +154,7 @@ test(int nowait)
 	putchar('3');
 	check();
 
-	/*
+	/*	
 	 * These must be called in reverse order to avoid waiting
 	 * improperly.
 	 */

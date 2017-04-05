@@ -183,14 +183,15 @@ proc_destroy(struct proc *proc)
 		 */
 		struct addrspace *as;
 
-		if (proc == curproc) {
-			as = proc_setas(NULL);
-			as_deactivate();
-		}
-		else {
-			as = proc->p_addrspace;
-			proc->p_addrspace = NULL;
-		}
+		// if (proc == curproc) {
+		// 	as = proc_setas(NULL);
+		// 	as_deactivate();
+		// }
+		// else {
+		// 	as = proc->p_addrspace;
+		// 	proc->p_addrspace = NULL;
+		// }
+		as = proc->p_addrspace;
 		as_destroy(as, proc->pid);
 	}
 
@@ -444,10 +445,17 @@ get_pid(pid_t pid)
 	KASSERT(pid >= PID_MIN && pid <= PID_MAX);
 
 	struct proc *proc;
+	bool acquired = lock_do_i_hold(pidtable->pid_lock);
 
-	lock_acquire(pidtable->pid_lock);
+	if (!acquired) {
+		lock_acquire(pidtable->pid_lock);
+	} 
+
 	proc = pidtable->pid_procs[pid]; 
-	lock_release(pidtable->pid_lock);
+
+	if (!acquired) {
+		lock_release(pidtable->pid_lock);
+	}
 
 	return proc;	
 }
@@ -499,8 +507,8 @@ pidtable_update_children(struct proc *proc)
 			if(child_pid < pidtable->pid_next){
 				pidtable->pid_next = child_pid;
 			}
-			clear_pid(child_pid);
 			proc_destroy(child);
+			clear_pid(child_pid);
 		}
 		else{
 			panic("Tried to modify a child that did not exist.\n");

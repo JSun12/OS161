@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <spl.h>
 #include <proc.h>
+#include <thread.h>
 #include <wchan.h>
 #include <addrspace.h>
 #include <lib.h>
@@ -52,6 +53,7 @@ static volatile p_page_t swapclock;
 
 #define SWAP_OUT_COUNT    0x1
 #define NUM_FREE_PPAGES   8
+#define DAEMON_EVICT_NUM  4
 
 // PASSING MATMULT!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -284,6 +286,12 @@ swap_bootstrap()
 
     io_wc = wchan_create("io_wc");
     io_flag = false;
+
+    // remove this when we know the truth
+    KASSERT(kproc != NULL); 
+
+    if (0)
+    thread_fork("Paging Daemon", kproc, paging_daemon, NULL, 0);
 }
 
 vaddr_t
@@ -412,7 +420,6 @@ entry_swappable(p_page_t p_page)
     return true;
 }
 
-// TODO: magic number
 static
 bool
 entry_recently_used(p_page_t p_page)
@@ -455,7 +462,7 @@ find_free_swap(p_page_t *p_page)
         }
     }
 
-    return ENOMEM; 
+    return SWAPNOMEM; 
 }
 
 static 
@@ -474,9 +481,15 @@ swap_evict_uio(p_page_t p_page)
     KASSERT(in_swap(p_page));
 
     struct iovec *iov = kmalloc(sizeof(struct iovec)); 
-    struct uio *u = kmalloc(sizeof(struct uio));
+    if (iov == NULL) {
+        return NULL;
+    }
 
-    // TODO: same dirty hack; using the kernel to take data from memory
+    struct uio *u = kmalloc(sizeof(struct uio));
+    if (u == NULL) {
+        return NULL;
+    }
+
     iov->iov_kbase = (void *) PAGE_TO_ADDR(PPAGE_TO_KVPAGE(swapclock));
     iov->iov_len = PAGE_SIZE;
     u->uio_iov = iov;
@@ -497,9 +510,15 @@ swap_load_uio(p_page_t p_page, p_page_t old_p_page)
     KASSERT(in_ram(p_page));
 
     struct iovec *iov = kmalloc(sizeof(struct iovec)); 
-    struct uio *u = kmalloc(sizeof(struct uio));
+    if (iov == NULL) {
+        return NULL;
+    }
 
-    // TODO: same dirty hack; using the kernel to take data from memory
+    struct uio *u = kmalloc(sizeof(struct uio));
+    if (u == NULL) {
+        return NULL;
+    }
+
     iov->iov_kbase = (void *) PAGE_TO_ADDR(PPAGE_TO_KVPAGE(p_page));
     iov->iov_len = PAGE_SIZE;
     u->uio_iov = iov;
@@ -517,6 +536,9 @@ static
 void 
 swap_uio_cleanup(struct uio *u)
 {
+    KASSERT(u != NULL);
+    KASSERT(u->uio_iov != NULL); 
+
     kfree(u->uio_iov); 
     kfree(u); 
 }
@@ -540,7 +562,9 @@ update_pt_entries(p_page_t swap_to_page, p_page_t old_page)
         spinlock_release(&global);
 
         struct proc *proc = get_pid(pid);
-        KASSERT(proc != NULL); 
+        if (proc == NULL) { // done this way for
+            KASSERT(proc != NULL); 
+        }
 
         spinlock_acquire(&global);
         spinlock_acquire(&cm_spinlock);
@@ -588,21 +612,8 @@ update_pt_entries(p_page_t swap_to_page, p_page_t old_page)
         
         struct l1_pt *l1_pt = (struct l1_pt *) PADDR_TO_KVADDR(PAGE_TO_ADDR(p_page));
 
-        // if(!check) {
-        //     l1[pos] = l1_pt->l1_entries[v_l1];
-        //     if ((l1_pt->l1_entries[v_l1] & PAGE_MASK) != swapclock){
-        //         // KASSERT((l1_pt->l1_entries[v_l1] & PAGE_MASK) == swapclock);
-        //     }
-        // }
-
         l1_pt->l1_entries[v_l1] = l1_pt->l1_entries[v_l1] & (~PAGE_MASK);   
         l1_pt->l1_entries[v_l1] = l1_pt->l1_entries[v_l1] | swap_to_page;
-        
-        // if (check) {
-        //     if (!(l1[pos] == l1_pt->l1_entries[v_l1])) {
-        //         // KASSERT(l1[pos] == l1_pt->l1_entries[v_l1]);
-        //     }
-        // }
     }
 }
 
@@ -627,7 +638,7 @@ swap_out()
     size_t free_pages = last_page - cm_counter;
 
     if (free_pages >= NUM_FREE_PPAGES) {
-        return -1; 
+        return ENOUGHFREE; 
     }
 
     p_page_t first_clock = swapclock;
@@ -683,8 +694,109 @@ swap_out()
 
     spinlock_release(&cm_spinlock);
 
-    return -1;
+    return NOSWAPPABLE;
 }
+
+// add any error codes
+int
+swap_in(p_page_t p_page, p_page_t old_p_page)
+{
+    KASSERT(cm->cm_entries[p_page] & PP_USED);
+    KASSERT(cm->cm_entries[old_p_page] & PP_USED);
+    KASSERT(in_ram(p_page));
+    KASSERT(in_swap(old_p_page));
+
+    struct uio *u = swap_load_uio(p_page, old_p_page);
+    if (u == NULL) {
+        return ENOMEM;
+    }
+
+    io_flag = true;
+    spinlock_release(&cm_spinlock);
+    spinlock_release(&global);
+
+    VOP_READ(swap_disk, u);
+    swap_uio_cleanup(u);
+
+    spinlock_acquire(&global);
+    spinlock_acquire(&cm_spinlock);
+    io_flag = false;
+    wchan_wakeall(io_wc, &global);
+
+    return 0; 
+}
+
+int
+swap_in_l1(p_page_t *p_page_ptr) 
+{
+    p_page_t p_page = *p_page_ptr;
+    KASSERT(in_swap(p_page));
+
+    int result; 
+
+    p_page_t new_page = first_alloc_page;
+    result = find_free(1, &new_page);
+    if (result) {
+        // thread_yield();
+        KASSERT(0);
+        return result;
+    }
+
+    cm_counter++;
+    cm->cm_entries[new_page] = cm->cm_entries[p_page];
+    cm->pids8_entries[new_page] = cm->pids8_entries[p_page];
+    swap_in(new_page, p_page);
+    in = true;
+    update_pt_entries(new_page, p_page);
+    in = false;
+    free_ppage_swap(p_page);
+    
+    *p_page_ptr = new_page;
+
+    return 0;
+}
+
+void
+paging_daemon(void *data1, unsigned long data2)
+{
+    (void) data1; 
+    (void) data2;
+    // int spl;
+    int result;
+
+    while(true) {
+        spinlock_acquire(&global);
+        // spl = splhigh();
+
+        for (int count = 0; count < DAEMON_EVICT_NUM; count++) {
+            result = swap_out();
+            if (result) {
+                switch(result) {
+                    case ENOUGHFREE:
+                    goto done;
+                    break;
+
+                    case NOSWAPPABLE: 
+                    goto done;
+                    break;
+
+                    case SWAPNOMEM:
+                    goto done;
+                    break;
+                }
+            }
+            break;
+        }
+
+     done:
+        // splx(spl); 
+        spinlock_release(&global);
+        thread_yield();
+    }
+}
+
+
+//////////// SWAP TEST FUNCTIONS
 
 int
 swap_out_test(p_page_t *mem_page, p_page_t *swap_page)
@@ -761,66 +873,6 @@ swap_out_test(p_page_t *mem_page, p_page_t *swap_page)
     spinlock_release(&cm_spinlock);
 
     return -1;
-}
-
-// add any error codes
-int
-swap_in(p_page_t p_page, p_page_t old_p_page)
-{
-    KASSERT(cm->cm_entries[p_page] & PP_USED);
-    KASSERT(cm->cm_entries[old_p_page] & PP_USED);
-    KASSERT(in_ram(p_page));
-    KASSERT(in_swap(old_p_page));
-
-    struct uio *u = swap_load_uio(p_page, old_p_page);
-
-    io_flag = true;
-    spinlock_release(&cm_spinlock);
-    spinlock_release(&global);
-
-    VOP_READ(swap_disk, u);
-    swap_uio_cleanup(u);
-
-    spinlock_acquire(&global);
-    spinlock_acquire(&cm_spinlock);
-    io_flag = false;
-    wchan_wakeall(io_wc, &global);
-
-    // for (unsigned i = 0; i < PAGE_SIZE; i++) {
-    //     char *ptr = (char *) (PAGE_TO_ADDR(PPAGE_TO_KVPAGE(p_page)) + i);
-    //     if (*ptr != content[i]) {
-    //         KASSERT(*ptr == content[i]);
-    //     }
-    // }
-
-    return 0; 
-}
-
-int
-swap_in_l1(p_page_t *p_page_ptr) 
-{
-    p_page_t p_page = *p_page_ptr;
-    int result; 
-
-    p_page_t new_page = first_alloc_page;
-    result = find_free(1, &new_page);
-    if (result) {
-        KASSERT(0);
-        return result;
-    }
-
-    cm_counter++;
-    cm->cm_entries[new_page] = cm->cm_entries[p_page];
-    cm->pids8_entries[new_page] = cm->pids8_entries[p_page];
-    swap_in(new_page, p_page);
-    in = true;
-    update_pt_entries(new_page, p_page);
-    in = false;
-    free_ppage_swap(p_page);
-    
-    *p_page_ptr = new_page;
-
-    return 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -994,8 +1046,8 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         spinlock_release(&cm_spinlock);
     }
 
-    // p_page_t l1_p_page = ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt));
-    // cm->cm_entries[l1_p_page] = cm->cm_entries[l1_p_page] | REF_BIT;
+    p_page_t l1_p_page = ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt));
+    cm->cm_entries[l1_p_page] = cm->cm_entries[l1_p_page] | REF_BIT;
 
     l1_entry_t l1_entry = l1_pt->l1_entries[v_l1];
     p_page_t p_page;

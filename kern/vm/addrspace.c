@@ -103,6 +103,12 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 	struct addrspace *newas;
 	int result;
 
+	/* The process for the new address space must already be in the pid table */
+	struct proc *proc = get_pid(pid);
+	KASSERT(proc != NULL);
+	KASSERT(proc->pid == pid);
+	KASSERT(proc->p_addrspace == *ret);
+
 	newas = as_create();
 	if (newas==NULL) {
 		return ENOMEM;
@@ -182,6 +188,12 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 void
 as_destroy(struct addrspace *as, pid_t pid)
 {
+	KASSERT(as != NULL); 
+	/* The process for the new address space must already be in the pid table */
+	struct proc *proc = get_pid(pid);
+	KASSERT(proc != NULL);
+	KASSERT(proc->pid == pid);
+
     spinlock_acquire(&global);
     while (io_flag) {
         wchan_sleep(io_wc, &global);

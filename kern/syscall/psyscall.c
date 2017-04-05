@@ -9,6 +9,7 @@
 #include <syscall.h>
 #include <copyinout.h>
 #include <psyscall.h>
+#include <wchan.h>
 
 
 static
@@ -77,11 +78,11 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 int
 sys_getpid(int32_t *retval0)
 {
-	lock_acquire(pidtable->pid_lock);
+	spinlock_acquire(pidtable->pid_lock);
 
 	*retval0 = curproc->pid;
 
-	lock_release(pidtable->pid_lock);
+	spinlock_release(pidtable->pid_lock);
 	return 0;
 }
 
@@ -116,16 +117,16 @@ sys_waitpid(pid_t pid, int32_t *retval0, int32_t options)
 		return ECHILD;
 	}
 
-	lock_acquire(pidtable->pid_lock);
+	spinlock_acquire(pidtable->pid_lock);
 
 	status = pidtable->pid_status[pid];
 	while(status != ZOMBIE){
-		cv_wait(pidtable->pid_cv, pidtable->pid_lock);
+		wchan_sleep(pidtable->pid_wchan, pidtable->pid_lock);
 		status = pidtable->pid_status[pid];
 	}
 	waitcode = pidtable->pid_waitcode[pid];
 
-	lock_release(pidtable->pid_lock);
+	spinlock_release(pidtable->pid_lock);
 
 	/* A NULL retval0 indicates that nothing is to be returned. */
 	if(retval0 != NULL){
@@ -182,7 +183,7 @@ strlen_check(const char *string, int max_len, size_t *actual_length)
 /*
 Return error if there are more arguments than ARG_MAX
 */
-static 
+static
 int
 get_argc(char **args, int *argc)
 {
@@ -297,12 +298,12 @@ copy_out_args(int argc, char **args, int *size, vaddr_t *stackptr, userptr_t *ar
 
 static
 void
-switch_addrspace(struct addrspace *as_old) 
+switch_addrspace(struct addrspace *as_old)
 {
 	proc_setas(NULL);
 	as_deactivate();
 
-	proc_setas(as_old);		
+	proc_setas(as_old);
 	as_activate();
 }
 
@@ -313,7 +314,7 @@ free_copied_in_args(int argc, int *size, char **args_in)
 	for (int i = 0; i < argc; i++) {
 		kfree(args_in[i]);
 	}
-	
+
 	kfree(size);
 	kfree(args_in);
 }

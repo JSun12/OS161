@@ -52,6 +52,7 @@
 #include <kern/errno.h>
 #include <machine/trapframe.h>
 #include <cpu.h>
+#include <wchan.h>
 
 /*
  * The process for the kernel; this holds all the kernel-only threads.
@@ -445,19 +446,19 @@ get_pid(pid_t pid)
 	KASSERT(pid >= PID_MIN && pid <= PID_MAX);
 
 	struct proc *proc;
-	bool acquired = lock_do_i_hold(pidtable->pid_lock);
+	bool acquired = spinlock_do_i_hold(pidtable->pid_lock);
 
 	if (!acquired) {
-		lock_acquire(pidtable->pid_lock);
-	} 
-
-	proc = pidtable->pid_procs[pid]; 
-
-	if (!acquired) {
-		lock_release(pidtable->pid_lock);
+		spinlock_acquire(pidtable->pid_lock);
 	}
 
-	return proc;	
+	proc = pidtable->pid_procs[pid];
+
+	if (!acquired) {
+		spinlock_release(pidtable->pid_lock);
+	}
+
+	return proc;
 }
 
 /* Removes a given PID from the PID table. Used for failed forks. */
@@ -466,9 +467,9 @@ pidtable_freepid(pid_t pid)
 {
 	KASSERT(pid >= PID_MIN && pid <= PID_MAX);
 
-	lock_acquire(pidtable->pid_lock);
+	spinlock_acquire(pidtable->pid_lock);
 	clear_pid(pid);
-	lock_release(pidtable->pid_lock);
+	spinlock_release(pidtable->pid_lock);
 }
 
 /* Adds a given process to the pidtable at the given index */
@@ -489,7 +490,7 @@ static
 void
 pidtable_update_children(struct proc *proc)
 {
-	KASSERT(lock_do_i_hold(pidtable->pid_lock));
+	KASSERT(spinlock_do_i_hold(pidtable->pid_lock));
 	KASSERT(proc != NULL);
 
 	int num_child = array_num(proc->children);
@@ -528,14 +529,14 @@ pidtable_bootstrap()
 		panic("Unable to initialize PID table.\n");
 	}
 
-	pidtable->pid_lock = lock_create("pidtable lock");
+	spinlock_init(pidtable->pid_lock);
 	if (pidtable->pid_lock == NULL) {
 		panic("Unable to intialize PID table's lock.\n");
 	}
 
-	pidtable->pid_cv = cv_create("pidtable cv");
-	if (pidtable->pid_lock == NULL) {
-		panic("Unable to intialize PID table's cv.\n");
+	pidtable->pid_wchan = wchan_create("pidtable wchan");
+	if (pidtable->pid_wchan == NULL) {
+		panic("Unable to intialize PID table's wchan.\n");
 	}
 
 	/* Set the kernel thread parameters */
@@ -561,10 +562,10 @@ pidtable_add(struct proc *proc, int32_t *retval)
 
 	KASSERT(proc != NULL);
 
-	lock_acquire(pidtable->pid_lock);
+	spinlock_acquire(pidtable->pid_lock);
 
 	if (pidtable->pid_available < 1){
-		lock_release(pidtable->pid_lock);
+		spinlock_release(pidtable->pid_lock);
 		return ENPROC;
 	}
 
@@ -589,7 +590,7 @@ pidtable_add(struct proc *proc, int32_t *retval)
 		pidtable->pid_next = PID_MAX + 1;
 	}
 
-	lock_release(pidtable->pid_lock);
+	spinlock_release(pidtable->pid_lock);
 
 	return output;
 }
@@ -602,7 +603,7 @@ pidtable_exit(struct proc *proc, int32_t waitcode)
 {
 	KASSERT(proc != NULL);
 
-	lock_acquire(pidtable->pid_lock);
+	spinlock_acquire(pidtable->pid_lock);
 
 	pidtable_update_children(proc);
 
@@ -613,7 +614,7 @@ pidtable_exit(struct proc *proc, int32_t waitcode)
 	}
 	/* Case: Parent already exited. Reset the current pidtable spot for later use. */
 	else if(pidtable->pid_status[proc->pid] == ORPHAN){
-		pid_t pid = proc->pid; 
+		pid_t pid = proc->pid;
 		proc_destroy(curproc);
 		clear_pid(pid);
 	}
@@ -622,9 +623,9 @@ pidtable_exit(struct proc *proc, int32_t waitcode)
 	}
 
 	/* Broadcast to any waiting processes. There is no guarentee that the processes on the cv are waiting for us */
-	cv_broadcast(pidtable->pid_cv,pidtable->pid_lock);
+	wchan_wakeall(pidtable->pid_wchan,pidtable->pid_lock);
 
-	lock_release(pidtable->pid_lock);
+	spinlock_release(pidtable->pid_lock);
 
 	thread_exit();
 }

@@ -76,8 +76,8 @@ struct proc {
 };
 
 struct pidtable {
-	struct lock *pid_lock;
-	struct cv *pid_cv;  /* To allow for processes to sleep on waitpid */
+	struct spinlock *pid_lock;
+	struct wchan *pid_wchan;  /* To allow for processes to sleep on waitpid */
 	struct proc *pid_procs[PID_MAX+1]; /* Array to hold processes */
 	int pid_status[PID_MAX+1]; /* Array to hold process statuses */
 	int pid_waitcode[PID_MAX+1]; /* Array to hold the wait codes*/

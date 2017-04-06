@@ -1225,7 +1225,7 @@ free_vpage(struct l2_pt *l2_pt, v_page_t v_page)
 
             spinlock_release(&cm_spinlock);
 
-            l1_pt->l1_entries[v_l1] = 0;
+            //l1_pt->l1_entries[v_l1] = 0;
         }
     }
 }
@@ -1240,12 +1240,13 @@ free_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2)
         spinlock_acquire(&cm_spinlock);
 
         if (cm_getref(p_page) > 1) {
+            rem_pid8(p_page, curproc->pid);
             cm_decref(p_page);
         } else {
             // PADDR_TO_KVADDR
-            struct l1_pt *l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);
+            //struct l1_pt *l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);
             //TODO: Ensure correctness
-            //struct l1_pt *l1_pt = (struct l1_pt *) PADDR_TO_KVADDR(PAGE_TO_ADDR(v_page));
+            struct l1_pt *l1_pt = (struct l1_pt *) PADDR_TO_KVADDR(PAGE_TO_ADDR(v_page));
             kfree(l1_pt);
         }
 
@@ -1451,6 +1452,7 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
                     add_l1table(v_l2, as);
                     for (v_page_l1_t v_l1 = old_l1; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
                         add_emptypage(v_l1, v_l2, cur_vaddr, as);
+                        cur_vaddr += PAGE_SIZE;
                     }
                 }
             }
@@ -1458,6 +1460,7 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
             add_l1table(new_l2, as);
             for (v_page_l1_t v_l1 = 0; v_l1 < new_l1; v_l1++) {
                 add_emptypage(v_l1, new_l2, cur_vaddr, as);
+                cur_vaddr += PAGE_SIZE;
             }
         }
     }

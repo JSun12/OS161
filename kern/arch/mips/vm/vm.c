@@ -1288,84 +1288,6 @@ add_emptypage(v_page_l1_t v_l1, v_page_l2_t v_l2, vaddr_t vaddr, struct addrspac
     cm_incref(p_page);
     add_pid8(p_page, curproc->pid);
 
-    /*
-
-        p_page_t l1_p_page = ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt));
-        cm->cm_entries[l1_p_page] = cm->cm_entries[l1_p_page] | REF_BIT;
-
-        l1_entry_t l1_entry = l1_pt->l1_entries[v_l1];
-        p_page_t p_page;
-
-        // Get the faulting address' physical address
-        if (l1_entry & ENTRY_VALID) {
-            if (faulttype == VM_FAULT_READONLY && !(l1_entry & ENTRY_WRITABLE)) {
-                p_page_t old_page = l1_entry & PAGE_MASK;
-                KASSERT(in_all_memory(old_page));
-                KASSERT((cm->cm_entries[old_page] & PAGE_MASK) == ADDR_TO_PAGE(fault_page));
-                KASSERT(in_ram(old_page)); // used as a test (this shouldn't be here)
-
-                spinlock_acquire(&cm_spinlock);
-
-                if (cm_getref(old_page) > 1) {
-                    // TODO: reduce code repetition with kmalloc
-                    p_page = first_alloc_page;
-                    result = find_free(1, &p_page);
-                    if (result) {
-                        spinlock_release(&cm_spinlock);
-                        spinlock_release(&global);
-                        return result;
-                    }
-
-                    cm_counter++;
-                    cm->cm_entries[p_page] = 0
-                                           | PP_USED
-                                           | ADDR_TO_PAGE(fault_page);
-                    cm_incref(p_page);
-                    add_pid8(p_page, pid);
-
-                    cm_decref(old_page);
-                    rem_pid8(old_page, pid);
-
-                    // TODO: get rid of this dirty hack
-                    const void *src = (const void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(old_page));
-                    void *dst = (void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(p_page));
-                    memmove(dst, src, (size_t) PAGE_SIZE);
-
-                    l1_pt->l1_entries[v_l1] = 0
-                                            | ENTRY_VALID
-                                            | ENTRY_READABLE
-                                            | ENTRY_WRITABLE
-                                            | p_page;
-
-
-    */
-
-
-
-
-    /*
-    p_page = first_alloc_page;
-    result = find_free(1, &p_page);
-    if (result) {
-        spinlock_release(&cm_spinlock);
-        return result;
-    }
-
-    cm_counter++;
-    cm->cm_entries[p_page] = 0
-                            | PP_USED
-                            | ADDR_TO_PAGE(vaddr);
-
-
-    l1_pt->l1_entries[v_l1] = 0
-                            | ENTRY_VALID
-                            | ENTRY_READABLE
-                            | ENTRY_WRITABLE
-                            | p_page;
-    cm_incref(p_page);
-    add_pid8(p_page, curproc->pid);
-    */
-
     spinlock_release(&cm_spinlock);
 
     return 0;
@@ -1402,49 +1324,6 @@ add_l1table(v_page_l2_t v_l2, struct addrspace *as) {
     spinlock_release(&cm_spinlock);
 
     return 0;
-
-    /*
-
-    p_page_t new_p_page = ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt));
-
-    struct l1_pt *l1_pt_orig = (struct l1_pt *) vaddr;
-    for (v_page_l1_t l1_val = 0; l1_val < NUM_L1PT_ENTRIES; l1_val++) {
-        l1_pt->l1_entries[l1_val] = l1_pt_orig->l1_entries[l1_val];
-    }
-
-    l2_pt->l2_entries[v_l2] = 0
-                            | ENTRY_VALID
-                            | ENTRY_READABLE
-                            | ENTRY_WRITABLE
-                            | ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt));
-
-    */
-
-
-
-
-
-    /*
-    result = l1_create(&l1_pt);
-    if (result) {
-        spinlock_release(&global);
-        return result;
-    }
-
-    spinlock_acquire(&cm_spinlock);
-
-    p_page_t p_page = ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt));
-    l2_pt->l2_entries[v_l2] = 0
-                            | ENTRY_VALID
-                            | ENTRY_READABLE
-                            | ENTRY_WRITABLE
-                            | p_page;
-
-    cm_incref(p_page);
-    add_pid8(p_page, pid);
-
-    spinlock_release(&cm_spinlock);
-    */
 }
 
 /*
@@ -1525,8 +1404,13 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
         *retval0 = old_heap_end;
         as->brk = new_heap_end;
     }
+    if (0){
+        add_l1table(1, as);
+        add_emptypage(1, 1, 1, as);
+    }
     // Check to see if we have enough memory
     if (new_heap_end > old_heap_end){
+
         // TODO: Increase code reuse between this and the above case
         v_page_l2_t old_l2 = L2_PNUM(old_heap_end);
         v_page_l1_t old_l1 = L1_PNUM(old_heap_end);
@@ -1548,13 +1432,8 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
             return ENOMEM;
         }
 
-        //XXX: Am I dealing with the first old_l2 / old_l1 correctly? Heap_end is not allocated Im assuming...?
         vaddr_t cur_vaddr = old_heap_end;
         if (old_l2 == new_l2){
-            // The entry does not exist in l1 for the first use.
-            if (!(old_l2 & ENTRY_WRITABLE)){
-                add_l1table(old_l2, as);
-            }
             for (v_page_l1_t v_l1 = old_l1; v_l1 < new_l1; v_l1++) {
                 add_emptypage(v_l1, old_l2, cur_vaddr, as);
                 cur_vaddr += PAGE_SIZE;

@@ -15,6 +15,7 @@
 #include <kern/fcntl.h>
 #include <uio.h>
 #include <vnode.h>
+#include <cpu.h>
 
 struct spinlock global = SPINLOCK_INITIALIZER;
 
@@ -654,6 +655,7 @@ swap_out()
 
             result = find_free_swap(&swap_to_page);
             if (result) {
+                KASSERT(0);
                 spinlock_release(&cm_spinlock);
                 return result;
             }
@@ -662,6 +664,9 @@ swap_out()
             cm->pids8_entries[swap_to_page] = cm->pids8_entries[swapclock];
 
             struct uio *u = swap_evict_uio(swap_to_page);
+            if (u == NULL) {
+                panic("eviction uio couldn't be created\n");
+            }
 
             io_flag = true;
             spinlock_release(&cm_spinlock);
@@ -708,12 +713,19 @@ swap_in(p_page_t p_page, p_page_t old_p_page)
 
     struct uio *u = swap_load_uio(p_page, old_p_page);
     if (u == NULL) {
+        KASSERT(0); // debugging
         return ENOMEM;
     }
 
     io_flag = true;
     spinlock_release(&cm_spinlock);
     spinlock_release(&global);
+
+    if (!(curcpu->c_spinlocks == 0)) {
+		int c_spinlocks = curcpu->c_spinlocks;
+		KASSERT(curcpu->c_spinlocks == 0);
+		(void) c_spinlocks;
+	}
 
     VOP_READ(swap_disk, u);
     swap_uio_cleanup(u);
@@ -974,6 +986,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             if (result) {
                 spinlock_release(&cm_spinlock);
                 spinlock_release(&global);
+                KASSERT(0); // debugging
                 return result;
             }
             spinlock_release(&cm_spinlock);
@@ -994,6 +1007,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 if (result) {
                     spinlock_release(&cm_spinlock);
                     spinlock_release(&global);
+                    KASSERT(0); // debugging
                     return result;
                 }
 
@@ -1028,6 +1042,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         result = l1_create(&l1_pt);
         if (result) {
             spinlock_release(&global);
+            KASSERT(0); // debugging
             return result;
         }
 
@@ -1058,7 +1073,11 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             p_page_t old_page = l1_entry & PAGE_MASK;
             KASSERT(in_all_memory(old_page));
             KASSERT((cm->cm_entries[old_page] & PAGE_MASK) == ADDR_TO_PAGE(fault_page));
-            KASSERT(in_ram(old_page)); // used as a test (this shouldn't be here)
+
+            // sometimes this assertion activates
+            if (!in_ram(old_page)){
+                KASSERT(in_ram(old_page)); // used as a test (this shouldn't be here)
+            }
 
             spinlock_acquire(&cm_spinlock);
 
@@ -1069,6 +1088,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 if (result) {
                     spinlock_release(&cm_spinlock);
                     spinlock_release(&global);
+                    KASSERT(0); // debugging
                     return result;
                 }
 
@@ -1113,6 +1133,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 if (result) {
                     spinlock_release(&cm_spinlock);
                     spinlock_release(&global);
+                    KASSERT(0); // debugging
                     return result;
                 }
 
@@ -1136,6 +1157,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         if (result) {
             spinlock_release(&cm_spinlock);
             spinlock_release(&global);
+            KASSERT(0); // debugging
             return result;
         }
 

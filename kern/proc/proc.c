@@ -446,16 +446,16 @@ get_pid(pid_t pid)
 	KASSERT(pid >= PID_MIN && pid <= PID_MAX);
 
 	struct proc *proc;
-	bool acquired = spinlock_do_i_hold(pidtable->pid_lock);
+	bool acquired = lock_do_i_hold(pidtable->pid_lock);
 
 	if (!acquired) {
-		spinlock_acquire(pidtable->pid_lock);
+		lock_acquire(pidtable->pid_lock);
 	}
 
 	proc = pidtable->pid_procs[pid];
 
 	if (!acquired) {
-		spinlock_release(pidtable->pid_lock);
+		lock_release(pidtable->pid_lock);
 	}
 
 	return proc;
@@ -467,9 +467,9 @@ pidtable_freepid(pid_t pid)
 {
 	KASSERT(pid >= PID_MIN && pid <= PID_MAX);
 
-	spinlock_acquire(pidtable->pid_lock);
+	lock_acquire(pidtable->pid_lock);
 	clear_pid(pid);
-	spinlock_release(pidtable->pid_lock);
+	lock_release(pidtable->pid_lock);
 }
 
 /* Adds a given process to the pidtable at the given index */
@@ -490,7 +490,7 @@ static
 void
 pidtable_update_children(struct proc *proc)
 {
-	KASSERT(spinlock_do_i_hold(pidtable->pid_lock));
+	KASSERT(lock_do_i_hold(pidtable->pid_lock));
 	KASSERT(proc != NULL);
 
 	int num_child = array_num(proc->children);
@@ -529,14 +529,14 @@ pidtable_bootstrap()
 		panic("Unable to initialize PID table.\n");
 	}
 
-	spinlock_init(pidtable->pid_lock);
+	pidtable->pid_lock = lock_create("pid_locK");
 	if (pidtable->pid_lock == NULL) {
 		panic("Unable to intialize PID table's lock.\n");
 	}
 
-	pidtable->pid_wchan = wchan_create("pidtable wchan");
-	if (pidtable->pid_wchan == NULL) {
-		panic("Unable to intialize PID table's wchan.\n");
+	pidtable->pid_cv = cv_create("pidtable cv");
+	if (pidtable->pid_cv == NULL) {
+		panic("Unable to intialize PID table's cv.\n");
 	}
 
 	/* Set the kernel thread parameters */
@@ -562,10 +562,10 @@ pidtable_add(struct proc *proc, int32_t *retval)
 
 	KASSERT(proc != NULL);
 
-	spinlock_acquire(pidtable->pid_lock);
+	lock_acquire(pidtable->pid_lock);
 
 	if (pidtable->pid_available < 1){
-		spinlock_release(pidtable->pid_lock);
+		lock_release(pidtable->pid_lock);
 		return ENPROC;
 	}
 
@@ -590,7 +590,7 @@ pidtable_add(struct proc *proc, int32_t *retval)
 		pidtable->pid_next = PID_MAX + 1;
 	}
 
-	spinlock_release(pidtable->pid_lock);
+	lock_release(pidtable->pid_lock);
 
 	return output;
 }
@@ -603,7 +603,7 @@ pidtable_exit(struct proc *proc, int32_t waitcode)
 {
 	KASSERT(proc != NULL);
 
-	spinlock_acquire(pidtable->pid_lock);
+	lock_acquire(pidtable->pid_lock);
 
 	pidtable_update_children(proc);
 
@@ -623,9 +623,9 @@ pidtable_exit(struct proc *proc, int32_t waitcode)
 	}
 
 	/* Broadcast to any waiting processes. There is no guarentee that the processes on the cv are waiting for us */
-	wchan_wakeall(pidtable->pid_wchan,pidtable->pid_lock);
+	cv_broadcast(pidtable->pid_cv, pidtable->pid_lock);
 
-	spinlock_release(pidtable->pid_lock);
+	lock_release(pidtable->pid_lock);
 
 	thread_exit();
 }

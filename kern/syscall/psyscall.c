@@ -78,11 +78,11 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 int
 sys_getpid(int32_t *retval0)
 {
-	spinlock_acquire(pidtable->pid_lock);
+	lock_acquire(pidtable->pid_lock);
 
 	*retval0 = curproc->pid;
 
-	spinlock_release(pidtable->pid_lock);
+	lock_release(pidtable->pid_lock);
 	return 0;
 }
 
@@ -117,16 +117,16 @@ sys_waitpid(pid_t pid, int32_t *retval0, int32_t options)
 		return ECHILD;
 	}
 
-	spinlock_acquire(pidtable->pid_lock);
+	lock_acquire(pidtable->pid_lock);
 
 	status = pidtable->pid_status[pid];
 	while(status != ZOMBIE){
-		wchan_sleep(pidtable->pid_wchan, pidtable->pid_lock);
+		cv_wait(pidtable->pid_cv, pidtable->pid_lock);
 		status = pidtable->pid_status[pid];
 	}
 	waitcode = pidtable->pid_waitcode[pid];
 
-	spinlock_release(pidtable->pid_lock);
+	lock_release(pidtable->pid_lock);
 
 	/* A NULL retval0 indicates that nothing is to be returned. */
 	if(retval0 != NULL){

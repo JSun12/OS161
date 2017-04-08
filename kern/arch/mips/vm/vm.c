@@ -39,7 +39,7 @@ static const char swap_dir[] = "lhd0raw:";
 static volatile p_page_t swapclock;
 
 //test
-static int gdbcounter = 0; 
+static int gdbcounter = 0;
 
 #define SWAP_OUT_COUNT    0x1
 #define NUM_FREE_PPAGES   0x8
@@ -554,7 +554,7 @@ update_pt_entries(p_page_t swap_to_page, p_page_t old_page)
     for (uint32_t pos = 0; pos < refs; pos++) {
         pid_t pid = get_pid8(swap_to_page, pos);
         KASSERT(pid != 0);
-        
+
         spinlock_release(&cm_spinlock);
 
         struct proc *proc = get_pid(pid);
@@ -645,7 +645,8 @@ swap_out()
 
             result = find_free_swap(&swap_to_page);
             if (result) {
-                KASSERT(0);
+                // XXX: There is no need for this error
+                //KASSERT(0);
                 spinlock_release(&cm_spinlock);
                 return result;
             }
@@ -1110,8 +1111,7 @@ void
 free_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2)
 {
     if (l2_pt->l2_entries[v_l2] & ENTRY_VALID) {
-        v_page_t v_page = l2_pt->l2_entries[v_l2] & PAGE_MASK;
-        p_page_t p_page = KVPAGE_TO_PPAGE(v_page);
+        p_page_t p_page = l2_pt->l2_entries[v_l2] & PAGE_MASK;
 
         spinlock_acquire(&cm_spinlock);
 
@@ -1119,10 +1119,18 @@ free_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2)
             rem_pid8(p_page, curproc->pid);
             cm_decref(p_page);
         } else {
-            // PADDR_TO_KVADDR
-            //struct l1_pt *l1_pt = (struct l1_pt *) PAGE_TO_ADDR(v_page);
-            //TODO: Ensure correctness
-            struct l1_pt *l1_pt = (struct l1_pt *) PADDR_TO_KVADDR(PAGE_TO_ADDR(v_page));
+            if (in_swap(p_page)) {
+                int result;
+                spinlock_acquire(&cm_spinlock);
+                result = swap_in_l1(&p_page);
+                if (result) {
+                    spinlock_release(&cm_spinlock);
+                    lock_release(global_lock);
+                    return;
+                }
+                spinlock_release(&cm_spinlock);
+            }
+            struct l1_pt *l1_pt = (struct l1_pt *) PADDR_TO_KVADDR(PAGE_TO_ADDR(p_page));
             kfree(l1_pt);
         }
 
@@ -1279,10 +1287,6 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
 
         tlb_invalidate();
     }
-    if (0){
-        add_l1table(1, as);
-        add_emptypage(1, 1, 1, as);
-    }
     // Check to see if we have enough memory
     if (new_heap_end > old_heap_end){
 
@@ -1303,7 +1307,7 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
         //XXX: This >= is required to pass sbrk test 10. This indicates that one of the free_pages isn't
         // free, or I'm allocating one too many pages
         int32_t free_pages = last_page - cm_counter;
-        if (num_used >= free_pages){
+        if (num_used >= free_pages - MIN_FREE_PAGES){
             *retval0 = -1;
             lock_release(global_lock);
             return ENOMEM;

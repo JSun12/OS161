@@ -17,7 +17,7 @@
 #include <vnode.h>
 #include <cpu.h>
 
-struct spinlock global = SPINLOCK_INITIALIZER;
+struct lock *global_lock;
 
 struct coremap *cm;
 struct spinlock cm_spinlock = SPINLOCK_INITIALIZER;
@@ -41,12 +41,6 @@ static cm_entry_t old_mem;
 // static l1_entry_t l1[4];
 static bool check = false;
 static volatile bool in = false;
-
-// static struct cv *io_cv;
-// static struct lock *io_lock;
-
-struct wchan *io_wc;
-volatile bool io_flag;
 
 static struct spinlock counter_spinlock = SPINLOCK_INITIALIZER;
 static volatile int swap_out_counter = 0;
@@ -267,6 +261,11 @@ vm_bootstrap()
     for (p_page_t p_page = 0; p_page < pages_used; p_page++) {
         kalloc_ppage(p_page);
     }
+
+    global_lock = lock_create("global_lock");
+    if (global_lock == NULL) {
+        panic("couldn't initialize global lock\n");
+    }
 }
 
 void
@@ -284,9 +283,6 @@ swap_bootstrap()
 
     first_page_swap = last_page;
     last_page_swap = 0x400;
-
-    io_wc = wchan_create("io_wc");
-    io_flag = false;
 
     // remove this when we know the truth
     KASSERT(kproc != NULL);
@@ -557,20 +553,13 @@ update_pt_entries(p_page_t swap_to_page, p_page_t old_page)
     for (uint32_t pos = 0; pos < refs; pos++) {
         pid_t pid = get_pid8(swap_to_page, pos);
         KASSERT(pid != 0);
-
-        io_flag = true;
+        
         spinlock_release(&cm_spinlock);
-        spinlock_release(&global);
 
         struct proc *proc = get_pid(pid);
-        if (proc == NULL) { // done this way for
-            KASSERT(proc != NULL);
-        }
+        KASSERT(proc != NULL);
 
-        spinlock_acquire(&global);
         spinlock_acquire(&cm_spinlock);
-        io_flag = false;
-        wchan_wakeall(io_wc, &global);
 
         struct addrspace *as = proc->p_addrspace;
         KASSERT(as != NULL);
@@ -665,23 +654,17 @@ swap_out()
 
             struct uio *u = swap_evict_uio(swap_to_page);
             if (u == NULL) {
-                panic("eviction uio couldn't be created\n");
+                KASSERT(0);
             }
 
-            io_flag = true;
             spinlock_release(&cm_spinlock);
-            spinlock_release(&global);
 
             VOP_WRITE(swap_disk, u);
             swap_uio_cleanup(u);
 
-            spinlock_acquire(&global);
             spinlock_acquire(&cm_spinlock);
-            io_flag = false;
-            wchan_wakeall(io_wc, &global);
 
             update_pt_entries(swap_to_page, swapclock);
-
             free_ppage(swapclock);
 
             spinlock_release(&cm_spinlock);
@@ -717,23 +700,12 @@ swap_in(p_page_t p_page, p_page_t old_p_page)
         return ENOMEM;
     }
 
-    io_flag = true;
     spinlock_release(&cm_spinlock);
-    spinlock_release(&global);
-
-    if (!(curcpu->c_spinlocks == 0)) {
-		int c_spinlocks = curcpu->c_spinlocks;
-		KASSERT(curcpu->c_spinlocks == 0);
-		(void) c_spinlocks;
-	}
 
     VOP_READ(swap_disk, u);
     swap_uio_cleanup(u);
 
-    spinlock_acquire(&global);
     spinlock_acquire(&cm_spinlock);
-    io_flag = false;
-    wchan_wakeall(io_wc, &global);
 
     return 0;
 }
@@ -773,12 +745,10 @@ paging_daemon(void *data1, unsigned long data2)
 {
     (void) data1;
     (void) data2;
-    // int spl;
     int result;
 
     while(true) {
-        spinlock_acquire(&global);
-        // spl = splhigh();
+        lock_acquire(global_lock);
 
         for (int count = 0; count < DAEMON_EVICT_NUM; count++) {
             result = swap_out();
@@ -801,8 +771,7 @@ paging_daemon(void *data1, unsigned long data2)
         }
 
      done:
-        // splx(spl);
-        spinlock_release(&global);
+        lock_release(global_lock);
         thread_yield();
     }
 }
@@ -848,17 +817,12 @@ swap_out_test(p_page_t *mem_page, p_page_t *swap_page)
 
             struct uio *u = swap_evict_uio(swap_to_page);
 
-            io_flag = true;
             spinlock_release(&cm_spinlock);
-            spinlock_release(&global);
 
             VOP_WRITE(swap_disk, u);
             swap_uio_cleanup(u);
 
-            spinlock_acquire(&global);
             spinlock_acquire(&cm_spinlock);
-            io_flag = false;
-            wchan_wakeall(io_wc, &global);
 
             KASSERT(cm->cm_entries[swap_to_page] == cm->cm_entries[swapclock]);
             KASSERT(cm->pids8_entries[swap_to_page] == cm->pids8_entries[swapclock]);
@@ -902,12 +866,8 @@ int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
 
-    spinlock_acquire(&global);
-    while (io_flag) {
-        wchan_sleep(io_wc, &global);
-    }
+    lock_acquire(global_lock);
 
-    KASSERT(io_flag == false);
     //Swapping
     if (1) {
     spinlock_acquire(&counter_spinlock);
@@ -961,7 +921,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     // TODO: do a proper address check (make sure kernel addresses aren't called)
     if (as->brk <= faultaddress && faultaddress < as->stack_top) {
-        spinlock_release(&global);
+        lock_release(global_lock);
         return SIGSEGV;
     }
 
@@ -985,7 +945,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             result = swap_in_l1(&p_page);
             if (result) {
                 spinlock_release(&cm_spinlock);
-                spinlock_release(&global);
+                lock_release(global_lock);
                 KASSERT(0); // debugging
                 return result;
             }
@@ -1006,7 +966,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 result = l1_create(&l1_pt);
                 if (result) {
                     spinlock_release(&cm_spinlock);
-                    spinlock_release(&global);
+                    lock_release(global_lock);
                     KASSERT(0); // debugging
                     return result;
                 }
@@ -1041,7 +1001,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     } else {
         result = l1_create(&l1_pt);
         if (result) {
-            spinlock_release(&global);
+            lock_release(global_lock);
             KASSERT(0); // debugging
             return result;
         }
@@ -1087,7 +1047,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 result = find_free(1, &p_page);
                 if (result) {
                     spinlock_release(&cm_spinlock);
-                    spinlock_release(&global);
+                    lock_release(global_lock);
                     KASSERT(0); // debugging
                     return result;
                 }
@@ -1132,7 +1092,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 result = find_free(1, &p_page);
                 if (result) {
                     spinlock_release(&cm_spinlock);
-                    spinlock_release(&global);
+                    lock_release(global_lock);
                     KASSERT(0); // debugging
                     return result;
                 }
@@ -1156,7 +1116,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         result = find_free(1, &p_page);
         if (result) {
             spinlock_release(&cm_spinlock);
-            spinlock_release(&global);
+            lock_release(global_lock);
             KASSERT(0); // debugging
             return result;
         }
@@ -1215,7 +1175,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     splx(spl);
 
-    spinlock_release(&global);
+    lock_release(global_lock);
     return 0;
 }
 
@@ -1366,7 +1326,7 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
         return EINVAL;
     }
     struct addrspace *as = curproc->p_addrspace;
-    spinlock_acquire(&global);
+    lock_acquire(global_lock);
 
     lock_acquire(as->as_lock);
 
@@ -1375,20 +1335,20 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
     vaddr_t new_heap_end = old_heap_end + amount;
     if (new_heap_end < as->heap_base) {
         lock_release(as->as_lock);
-        spinlock_release(&global);
+        lock_release(global_lock);
         return EINVAL;
     }
 
     int64_t overflow = (int64_t)old_heap_end + (int64_t)amount;
     if (overflow > USERSPACETOP || overflow < 0){
         lock_release(as->as_lock);
-        spinlock_release(&global);
+        lock_release(global_lock);
         return EINVAL;
     }
 
     if (new_heap_end > stack_top) {
         lock_release(as->as_lock);
-        spinlock_release(&global);
+        lock_release(global_lock);
         return ENOMEM;
     }
 
@@ -1459,7 +1419,7 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
         if (num_used >= free_pages){
             *retval0 = -1;
             lock_release(as->as_lock);
-            spinlock_release(&global);
+            lock_release(global_lock);
             return ENOMEM;
         }
 
@@ -1498,7 +1458,7 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
     as->brk = new_heap_end;
 
     lock_release(as->as_lock);
-    spinlock_release(&global);
+    lock_release(global_lock);
 
     return 0;
 }

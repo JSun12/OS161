@@ -1093,7 +1093,9 @@ wchan_wakeall(struct wchan *wc, struct spinlock *lk)
 	struct thread *target;
 	struct threadlist list;
 
-	KASSERT(spinlock_do_i_hold(lk));
+	if (!spinlock_do_i_hold(lk)){
+		KASSERT(spinlock_do_i_hold(lk));
+	}
 
 	threadlist_init(&list);
 

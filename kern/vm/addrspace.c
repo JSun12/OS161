@@ -15,6 +15,7 @@
  */
 
 extern struct spinlock global;
+extern struct lock *global_lock;
 
 extern struct cm *cm;
 extern struct spinlock cm_spinlock;
@@ -52,6 +53,7 @@ l2_init(struct l2_pt *l2_pt)
 void
 tlb_invalidate() {
 	int spl = splhigh();
+
 	uint32_t entryhi;
 	uint32_t entrylo;
 	uint32_t index;
@@ -114,13 +116,8 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 		return ENOMEM;
 	}
 
-    spinlock_acquire(&global);
-
-    while (io_flag) {
-        wchan_sleep(io_wc, &global);
-    }
-
-	KASSERT(io_flag == false);
+    lock_acquire(global_lock);
+	tlb_invalidate();	
 
 	struct l2_pt *l2_pt_new = newas->l2_pt;
 	struct l2_pt *l2_pt_old = old->l2_pt;
@@ -136,7 +133,7 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 				result = swap_in_l1(&p_page1);
 				if (result) {
 					spinlock_release(&cm_spinlock);
-					spinlock_release(&global);
+					lock_release(global_lock);
 					return result;
 				}
 				spinlock_release(&cm_spinlock);            
@@ -179,9 +176,8 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 
 	// TODO: reduce code repetition (similar to as_activate)
 
-	tlb_invalidate();
 
-	spinlock_release(&global);
+	lock_release(global_lock);
 	return 0;
 }
 
@@ -189,17 +185,14 @@ void
 as_destroy(struct addrspace *as, pid_t pid)
 {
 	KASSERT(as != NULL); 
+
 	/* The process for the new address space must already be in the pid table */
 	struct proc *proc = get_pid(pid);
 	KASSERT(proc != NULL);
 	KASSERT(proc->pid == pid);
 
-    spinlock_acquire(&global);
-    while (io_flag) {
-        wchan_sleep(io_wc, &global);
-    }
-
-    KASSERT(io_flag == false);
+    lock_acquire(global_lock);
+	tlb_invalidate();
 
 	struct l2_pt *l2_pt = as->l2_pt;
 	int result;
@@ -215,7 +208,7 @@ as_destroy(struct addrspace *as, pid_t pid)
 				result = swap_in_l1(&p_page1);
 				if (result) {
 					spinlock_release(&cm_spinlock);
-					spinlock_release(&global);
+					lock_release(global_lock);
 					return;
 				}
 				spinlock_release(&cm_spinlock);            
@@ -264,9 +257,8 @@ as_destroy(struct addrspace *as, pid_t pid)
 	kfree(as);
 
 	// TODO: is this necessary
-	tlb_invalidate();
 
-	spinlock_release(&global);
+	lock_release(global_lock);
 }
 
 void
@@ -279,11 +271,7 @@ as_activate(void)
 		return;
 	}
 
-    spinlock_acquire(&global);
-
 	tlb_invalidate();
-
-	spinlock_release(&global);
 }
 
 void

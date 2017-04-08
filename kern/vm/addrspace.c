@@ -80,15 +80,8 @@ as_create(void)
 		return NULL;
 	}
 
-	as->as_lock = lock_create("lock");
-	if (as->as_lock == NULL) {
-		kfree(as);
-		return NULL;
-	}
-
 	as->l2_pt = kmalloc(sizeof(struct l2_pt));
 	if (as->l2_pt == NULL) {
-		lock_destroy(as->as_lock);
 		kfree(as);
 		return NULL;
 	}
@@ -260,7 +253,6 @@ as_destroy(struct addrspace *as, pid_t pid)
 		}
 	}
 
-	lock_destroy(as->as_lock);
 	kfree(as->l2_pt);
 	kfree(as);
 

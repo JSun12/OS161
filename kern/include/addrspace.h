@@ -63,8 +63,6 @@ struct addrspace {
         vaddr_t heap_base;
         vaddr_t stack_top;
         vaddr_t brk;
-
-        struct lock *as_lock;
 #endif
 };
 

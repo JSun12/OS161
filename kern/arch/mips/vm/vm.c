@@ -972,7 +972,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             p_page_t old_page = l1_pt->l1_entries[v_l1] & PAGE_MASK;
             KASSERT(in_all_memory(old_page));
             // p testbin/sbrktest 15 fails with this assertion ..?
-            //KASSERT((cm->cm_entries[old_page] & PAGE_MASK) == ADDR_TO_PAGE(fault_page));
+            // KASSERT((cm->cm_entries[old_page] & PAGE_MASK) == ADDR_TO_PAGE(fault_page));
 
             spinlock_acquire(&cm_spinlock);
 
@@ -1218,26 +1218,21 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
     struct addrspace *as = curproc->p_addrspace;
     lock_acquire(global_lock);
 
-    lock_acquire(as->as_lock);
-
     vaddr_t stack_top = as->stack_top;
     vaddr_t old_heap_end = as->brk;
     vaddr_t new_heap_end = old_heap_end + amount;
     if (new_heap_end < as->heap_base) {
-        lock_release(as->as_lock);
         lock_release(global_lock);
         return EINVAL;
     }
 
     int64_t overflow = (int64_t)old_heap_end + (int64_t)amount;
     if (overflow > USERSPACETOP || overflow < 0){
-        lock_release(as->as_lock);
         lock_release(global_lock);
         return EINVAL;
     }
 
     if (new_heap_end > stack_top) {
-        lock_release(as->as_lock);
         lock_release(global_lock);
         return ENOMEM;
     }
@@ -1281,6 +1276,8 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
         }
         *retval0 = old_heap_end;
         as->brk = new_heap_end;
+
+        tlb_invalidate();
     }
     if (0){
         add_l1table(1, as);
@@ -1308,7 +1305,6 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
         int32_t free_pages = last_page - cm_counter;
         if (num_used >= free_pages){
             *retval0 = -1;
-            lock_release(as->as_lock);
             lock_release(global_lock);
             return ENOMEM;
         }
@@ -1347,7 +1343,6 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
     *retval0 = old_heap_end;
     as->brk = new_heap_end;
 
-    lock_release(as->as_lock);
     lock_release(global_lock);
 
     return 0;

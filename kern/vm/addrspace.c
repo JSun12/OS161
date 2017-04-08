@@ -16,9 +16,11 @@
 
 extern struct spinlock global;
 extern struct lock *global_lock;
+extern struct cv *global_cv;
 
 extern struct cm *cm;
 extern struct spinlock cm_spinlock;
+extern size_t cm_counter;
 
 extern struct wchan *io_wc; 
 extern bool io_flag;
@@ -117,6 +119,11 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 	}
 
     lock_acquire(global_lock);
+
+    while (!enough_free()) {
+        cv_wait(global_cv, global_lock);
+    }
+
 	tlb_invalidate();	
 
 	struct l2_pt *l2_pt_new = newas->l2_pt;
@@ -174,8 +181,6 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 
 	// TODO: change the dirty bits of the correct process, not just invalidate all tlb entries
 
-	// TODO: reduce code repetition (similar to as_activate)
-
 
 	lock_release(global_lock);
 	return 0;
@@ -185,10 +190,13 @@ void
 as_destroy(struct addrspace *as, pid_t pid)
 {
 	KASSERT(as != NULL); 
+	KASSERT(as->l2_pt != NULL);
 
-	/* The process for the new address space must already be in the pid table */
+	/* The process for the new address space must still be in the pid table */
 	struct proc *proc = get_pid(pid);
-	KASSERT(proc != NULL);
+	if (proc == NULL) {
+		KASSERT(proc != NULL);
+	}
 	KASSERT(proc->pid == pid);
 
     lock_acquire(global_lock);

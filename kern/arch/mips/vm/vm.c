@@ -18,6 +18,7 @@
 #include <cpu.h>
 
 struct lock *global_lock;
+struct cv *global_cv;
 
 struct coremap *cm;
 struct spinlock cm_spinlock = SPINLOCK_INITIALIZER;
@@ -35,22 +36,17 @@ static p_page_t last_page_swap; /* One page past the last free physical page SWA
 static struct vnode *swap_disk;
 static const char swap_dir[] = "lhd0raw:";
 
-// test
-static char content[0x1000];
-static cm_entry_t old_mem;
-// static l1_entry_t l1[4];
-static bool check = false;
-static volatile bool in = false;
-
-static struct spinlock counter_spinlock = SPINLOCK_INITIALIZER;
-static volatile int swap_out_counter = 0;
 static volatile p_page_t swapclock;
 
-#define SWAP_OUT_COUNT    0x1
-#define NUM_FREE_PPAGES   8
-#define DAEMON_EVICT_NUM  4
+//test
+static int gdbcounter = 0; 
 
-// PASSING MATMULT!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#define SWAP_OUT_COUNT    0x1
+#define NUM_FREE_PPAGES   0x8
+#define DAEMON_EVICT_NUM  0x8
+#define MIN_FREE_PAGES    4
+
+#define SWAP_ON 1
 
 /////////////////////////////////////////////////////////////////////////////////////////
 bool
@@ -266,6 +262,11 @@ vm_bootstrap()
     if (global_lock == NULL) {
         panic("couldn't initialize global lock\n");
     }
+
+    global_cv = cv_create("global_cv");
+    if (global_cv == NULL) {
+        panic("couldn't initialize global cv\n");
+    }
 }
 
 void
@@ -287,7 +288,7 @@ swap_bootstrap()
     // remove this when we know the truth
     KASSERT(kproc != NULL);
 
-    if (0)
+    if (SWAP_ON)
     thread_fork("Paging Daemon", kproc, paging_daemon, NULL, 0);
 }
 
@@ -696,7 +697,7 @@ swap_in(p_page_t p_page, p_page_t old_p_page)
 
     struct uio *u = swap_load_uio(p_page, old_p_page);
     if (u == NULL) {
-        KASSERT(0); // debugging
+        KASSERT(0);
         return ENOMEM;
     }
 
@@ -730,14 +731,18 @@ swap_in_l1(p_page_t *p_page_ptr)
     cm->cm_entries[new_page] = cm->cm_entries[p_page];
     cm->pids8_entries[new_page] = cm->pids8_entries[p_page];
     swap_in(new_page, p_page);
-    in = true;
     update_pt_entries(new_page, p_page);
-    in = false;
     free_ppage_swap(p_page);
 
     *p_page_ptr = new_page;
 
     return 0;
+}
+
+bool
+enough_free()
+{
+    return last_page - cm_counter >= MIN_FREE_PAGES;
 }
 
 void
@@ -771,84 +776,10 @@ paging_daemon(void *data1, unsigned long data2)
         }
 
      done:
+        cv_broadcast(global_cv, global_lock);
         lock_release(global_lock);
         thread_yield();
     }
-}
-
-
-//////////// SWAP TEST FUNCTIONS
-
-int
-swap_out_test(p_page_t *mem_page, p_page_t *swap_page)
-{
-    // size_t free_pages = last_page - cm_counter;
-
-    // if (free_pages >= NUM_FREE_PPAGES) {
-    //     return -1;
-    // }
-
-
-    p_page_t first_clock = swapclock;
-    int cycles = 0;
-    int result;
-
-    spinlock_acquire(&cm_spinlock);
-
-    // We iterate for 2 cycles, since after the first cycle, the reference bits are cleared
-    while (cycles < 2) {
-        if (entry_swappable(swapclock) && !entry_recently_used(swapclock)) {
-            p_page_t swap_to_page;
-
-            result = find_free_swap(&swap_to_page);
-            if (result) {
-                spinlock_release(&cm_spinlock);
-                return result;
-            }
-
-            old_mem = cm->cm_entries[swapclock];
-
-            cm->cm_entries[swap_to_page] = cm->cm_entries[swapclock];
-            cm->pids8_entries[swap_to_page] = cm->pids8_entries[swapclock];
-
-            const void *src = (const void *) PADDR_TO_KVADDR(PAGE_TO_ADDR(swapclock));
-            void *dst = (void *) &content;
-            memmove(dst, src, (size_t) PAGE_SIZE);
-
-            struct uio *u = swap_evict_uio(swap_to_page);
-
-            spinlock_release(&cm_spinlock);
-
-            VOP_WRITE(swap_disk, u);
-            swap_uio_cleanup(u);
-
-            spinlock_acquire(&cm_spinlock);
-
-            KASSERT(cm->cm_entries[swap_to_page] == cm->cm_entries[swapclock]);
-            KASSERT(cm->pids8_entries[swap_to_page] == cm->pids8_entries[swapclock]);
-
-            update_pt_entries(swap_to_page, swapclock);
-
-            // free_ppage(swapclock);
-            *mem_page = swapclock;
-            *swap_page = swap_to_page;
-
-            spinlock_release(&cm_spinlock);
-            swapclock_tick();
-            return 0;
-        }
-
-        cm->cm_entries[swapclock] = cm->cm_entries[swapclock] & (~REF_BIT);
-
-        swapclock_tick();
-        if (swapclock == first_clock) {
-            cycles++;
-        }
-    }
-
-    spinlock_release(&cm_spinlock);
-
-    return -1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -865,55 +796,15 @@ if not specified (that is, valid), assume readable and writable.
 int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
-
     lock_acquire(global_lock);
 
-    //Swapping
-    if (1) {
-    spinlock_acquire(&counter_spinlock);
+    gdbcounter++;
 
-    if (swap_out_counter == SWAP_OUT_COUNT - 1) {
-        swap_out_counter = 0;
-        spinlock_release(&counter_spinlock);
+    if (SWAP_ON){
         swap_out();
-    } else {
-        swap_out_counter++;
-        spinlock_release(&counter_spinlock);
-    }
-    }
-
-    /*
-    we have to adjust amount of swap depending on amount of ram (hard coded for now);
-    */
-
-    if (0) {
-    spinlock_acquire(&counter_spinlock);
-
-    if (swap_out_counter == SWAP_OUT_COUNT - 1) {
-        swap_out_counter = 0;
-        spinlock_release(&counter_spinlock);
-        p_page_t mem_page;
-        p_page_t swap_page;
-        check = false;
-        int ret = swap_out_test(&mem_page, &swap_page);
-
-        if (ret == 0) {
-            spinlock_acquire(&cm_spinlock);
-            KASSERT(cm->cm_entries[mem_page] == cm->cm_entries[swap_page]);
-            KASSERT(cm->pids8_entries[mem_page] == cm->pids8_entries[swap_page]);
-
-            check = true;
-            swap_in(mem_page, swap_page);
-            update_pt_entries(mem_page, swap_page);
-            free_ppage_swap(swap_page);
-
-            KASSERT(cm->cm_entries[mem_page] == old_mem);
-            spinlock_release(&cm_spinlock);
+        while (!enough_free()) {
+            cv_wait(global_cv, global_lock);
         }
-    } else {
-        swap_out_counter++;
-        spinlock_release(&counter_spinlock);
-    }
     }
 
     struct addrspace *as = curproc->p_addrspace;
@@ -946,7 +837,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             if (result) {
                 spinlock_release(&cm_spinlock);
                 lock_release(global_lock);
-                KASSERT(0); // debugging
+                KASSERT(0);
                 return result;
             }
             spinlock_release(&cm_spinlock);
@@ -957,7 +848,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         KASSERT(in_ram(p_page));
 
         if (faulttype == VM_FAULT_READONLY && !(l2_entry & ENTRY_WRITABLE)) {
-
             KASSERT(in_ram(p_page));
 
             spinlock_acquire(&cm_spinlock);
@@ -967,7 +857,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 if (result) {
                     spinlock_release(&cm_spinlock);
                     lock_release(global_lock);
-                    KASSERT(0); // debugging
+                    KASSERT(0);
                     return result;
                 }
 
@@ -1002,7 +892,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         result = l1_create(&l1_pt);
         if (result) {
             lock_release(global_lock);
-            KASSERT(0); // debugging
+            KASSERT(0);
             return result;
         }
 
@@ -1048,7 +938,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 if (result) {
                     spinlock_release(&cm_spinlock);
                     lock_release(global_lock);
-                    KASSERT(0); // debugging
+                    KASSERT(0);
                     return result;
                 }
 
@@ -1093,7 +983,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 if (result) {
                     spinlock_release(&cm_spinlock);
                     lock_release(global_lock);
-                    KASSERT(0); // debugging
+                    KASSERT(0);
                     return result;
                 }
 
@@ -1117,7 +1007,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         if (result) {
             spinlock_release(&cm_spinlock);
             lock_release(global_lock);
-            KASSERT(0); // debugging
+            KASSERT(0);
             return result;
         }
 

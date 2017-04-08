@@ -63,8 +63,9 @@ sys_fork(struct trapframe *tf, int32_t *retval0)
 	*retval0 = new_proc->pid;
 	ret = thread_fork("new_thread", new_proc, enter_usermode, new_tf, 1);
 	if (ret) {
-		pidtable_freepid(new_proc->pid);
+		pid_t pid = new_proc->pid;
 		proc_destroy(new_proc);
+		pidtable_freepid(pid);
 		kfree(new_tf);
 		return ret;
 	}

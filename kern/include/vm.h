@@ -233,6 +233,8 @@ int swap_out(void);
 int swap_out_test(p_page_t *, p_page_t *);
 int swap_in(p_page_t, p_page_t);
 int swap_in_l1(p_page_t *);
+
+bool enough_free(void);
 void paging_daemon(void *, unsigned long);
 
 /* Fault handling function called by trap code */

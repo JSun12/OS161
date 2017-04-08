@@ -972,7 +972,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             p_page_t old_page = l1_pt->l1_entries[v_l1] & PAGE_MASK;
             KASSERT(in_all_memory(old_page));
             // p testbin/sbrktest 15 fails with this assertion ..?
-            // KASSERT((cm->cm_entries[old_page] & PAGE_MASK) == ADDR_TO_PAGE(fault_page));
+            KASSERT((cm->cm_entries[old_page] & PAGE_MASK) == ADDR_TO_PAGE(fault_page));
 
             spinlock_acquire(&cm_spinlock);
 

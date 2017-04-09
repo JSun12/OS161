@@ -231,12 +231,16 @@ void swap_bootstrap(void);
 int swap_out(void);
 int swap_out_test(p_page_t *, p_page_t *);
 int swap_in(p_page_t, p_page_t);
-int swap_in_l1(p_page_t *);
+int swap_in_data(p_page_t *);
 
 bool enough_free(void);
 void paging_daemon(void *, unsigned long);
 
 /* Fault handling function called by trap code */
+int get_l1_pt(struct l2_pt *, v_page_l2_t, struct l1_pt **, bool);
+int l1_alloc_page(struct l1_pt *, v_page_l1_t, v_page_t, p_page_t *);
+int copy_user_data(struct l1_pt *, v_page_l1_t, p_page_t, v_page_t, p_page_t *);
+void release_ppage(p_page_t, pid_t);
 int vm_fault(int, vaddr_t);
 
 /* Allocate/free kernel heap pages (called by kmalloc/kfree) */
@@ -253,6 +257,6 @@ int sys_sbrk(ssize_t, int32_t *);
 void free_vpage(struct l2_pt *, v_page_l2_t, v_page_l1_t);
 void free_l1_pt(struct l2_pt *, v_page_l2_t);
 int add_ppage(struct l2_pt *, v_page_l2_t, v_page_l1_t);
-int add_l1_pt(struct l2_pt *, v_page_l2_t);
+int add_l1_pt(struct l2_pt *, v_page_l2_t, struct l1_pt **);
 
 #endif /* _VM_H_ */

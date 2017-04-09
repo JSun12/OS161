@@ -97,14 +97,14 @@ as_create(void)
 int
 as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 {
-	struct addrspace *newas;
-	int result;
-
 	/* The process for the new address space must already be in the pid table */
 	struct proc *proc = get_pid(pid);
 	KASSERT(proc != NULL);
 	KASSERT(proc->pid == pid);
 	KASSERT(proc->p_addrspace == *ret);
+
+	struct addrspace *newas;
+	int result;
 
 	newas = as_create();
 	if (newas==NULL) {
@@ -121,32 +121,27 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 
 	struct l2_pt *l2_pt_new = newas->l2_pt;
 	struct l2_pt *l2_pt_old = old->l2_pt;
+	struct l1_pt *l1_pt_old;
 
 	for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
 		l2_pt_old->l2_entries[v_l2] = l2_pt_old->l2_entries[v_l2] & (~ENTRY_WRITABLE);
 
 		if (l2_pt_old->l2_entries[v_l2] & ENTRY_VALID) {
-			p_page_t p_page1 = l2_pt_old->l2_entries[v_l2] & PAGE_MASK;
-
-			if (in_swap(p_page1)) {
-				spinlock_acquire(&cm_spinlock);
-				result = swap_in_l1(&p_page1);
-				if (result) {
-					spinlock_release(&cm_spinlock);
-					lock_release(global_lock);
-					return result;
-				}
-				spinlock_release(&cm_spinlock);            
+			result = get_l1_pt(l2_pt_old, v_l2, &l1_pt_old, false);
+			if (result) {
+				KASSERT(0); // debugging
+				lock_release(global_lock);
+				return result;
 			}
+
+			p_page_t p_page_l1 = ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt_old));
 
 			spinlock_acquire(&cm_spinlock);
 
-			cm_incref(p_page1); // TODO: maybe change this name p_page1
-			add_pid8(p_page1, pid);
+			cm_incref(p_page_l1);
+			add_pid8(p_page_l1, pid);
 				
 			spinlock_release(&cm_spinlock);
-
-			struct l1_pt *l1_pt_old = (struct l1_pt *) PADDR_TO_KVADDR(PAGE_TO_ADDR(l2_pt_old->l2_entries[v_l2] & PAGE_MASK));
 
 			for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
 				l1_pt_old->l1_entries[v_l1] = l1_pt_old->l1_entries[v_l1] & (~ENTRY_WRITABLE);
@@ -185,79 +180,42 @@ as_destroy(struct addrspace *as, pid_t pid)
 	KASSERT(as != NULL); 
 	KASSERT(as->l2_pt != NULL);
 
-	/* The process for the new address space must still be in the pid table */
+	/* The process for the old address space must still be in the pid table */
 	struct proc *proc = get_pid(pid);
-	if (proc == NULL) {
-		KASSERT(proc != NULL);
-	}
+	KASSERT(proc != NULL);
 	KASSERT(proc->pid == pid);
 
     lock_acquire(global_lock);
 	tlb_invalidate();
 
 	struct l2_pt *l2_pt = as->l2_pt;
+	struct l1_pt *l1_pt;
 	int result;
 
 	for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
-		l2_entry_t l2_entry = l2_pt->l2_entries[v_l2];
-
-		if (l2_entry & ENTRY_VALID) {
-			p_page_t p_page1 = l2_entry & PAGE_MASK;
-
-			if (in_swap(p_page1)) {
-				spinlock_acquire(&cm_spinlock);
-				result = swap_in_l1(&p_page1);
-				if (result) {
-					spinlock_release(&cm_spinlock);
-					lock_release(global_lock);
-					KASSERT(0); //for debugging
-					return;
-				}
-				spinlock_release(&cm_spinlock);            
+		if (l2_pt->l2_entries[v_l2] & ENTRY_VALID) {
+			result = get_l1_pt(l2_pt, v_l2, &l1_pt, false);
+			if (result) {
+				KASSERT(0); // debugging
+				lock_release(global_lock);
+				return;
 			}
-
-			struct l1_pt *l1_pt = (struct l1_pt *) PADDR_TO_KVADDR(PAGE_TO_ADDR(p_page1));
 
 			for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
 				l1_entry_t l1_entry = l1_pt->l1_entries[v_l1];
 
 				if (l1_entry & ENTRY_VALID) {
 					p_page_t p_page = l1_entry & PAGE_MASK;
-
-					spinlock_acquire(&cm_spinlock);
-
-					if (cm_getref(p_page) > 1) {
-						cm_decref(p_page);
-						rem_pid8(p_page, pid);
-					} else {
-						if (in_ram(p_page)) {
-							free_ppage(p_page);
-						} else {
-							free_ppage_swap(p_page);
-						}
-					}
-
-					spinlock_release(&cm_spinlock);
+					release_ppage(p_page, pid);
 				}
 			}
 
-			spinlock_acquire(&cm_spinlock);
-
-			if (cm_getref(p_page1) > 1) {
-				cm_decref(p_page1);
-				rem_pid8(p_page1, pid);
-			} else {
-				free_ppage(p_page1);
-			}
-
-			spinlock_release(&cm_spinlock);
+			release_ppage(ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt)), pid);
 		}
 	}
 
 	kfree(as->l2_pt);
 	kfree(as);
-
-	// TODO: is this necessary
 
 	lock_release(global_lock);
 }

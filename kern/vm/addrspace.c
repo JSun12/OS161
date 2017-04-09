@@ -210,6 +210,7 @@ as_destroy(struct addrspace *as, pid_t pid)
 				if (result) {
 					spinlock_release(&cm_spinlock);
 					lock_release(global_lock);
+					KASSERT(0); //for debugging
 					return;
 				}
 				spinlock_release(&cm_spinlock);            
@@ -246,7 +247,7 @@ as_destroy(struct addrspace *as, pid_t pid)
 				cm_decref(p_page1);
 				rem_pid8(p_page1, pid);
 			} else {
-				kfree(l1_pt);
+				free_ppage(p_page1);
 			}
 
 			spinlock_release(&cm_spinlock);

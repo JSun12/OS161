@@ -34,9 +34,11 @@
 TODO: make sure users can't access kernel addresses
 make sure to set tlb dirty bit as clear to enforce read only
 
-
 TODO: are my lines too long?
 
+TODO: deal with the dirty bit in cm entries
+
+TODO: check for memory leaks
 
 TODO: in AS define region, we may wish to make regions executable or read only, but
 they may not be allocated in physical memory, thus they are not valid. Thus, we
@@ -212,9 +214,6 @@ bool in_all_memory(p_page_t);
 void free_ppage(p_page_t);
 void free_ppage_swap(p_page_t);
 
-void free_vpage(struct l2_pt *, v_page_t);
-void free_l1_pt(struct l2_pt *, v_page_l2_t);
-
 size_t cm_getref(p_page_t);
 void cm_incref(p_page_t);
 void cm_decref(p_page_t);
@@ -248,7 +247,12 @@ void free_kpages(vaddr_t);
 void vm_tlbshootdown_all(void);
 void vm_tlbshootdown(const struct tlbshootdown *);
 
+
 int sys_sbrk(ssize_t, int32_t *);
 
+void free_vpage(struct l2_pt *, v_page_l2_t, v_page_l1_t);
+void free_l1_pt(struct l2_pt *, v_page_l2_t);
+int add_ppage(struct l2_pt *, v_page_l2_t, v_page_l1_t);
+int add_l1_pt(struct l2_pt *, v_page_l2_t);
 
 #endif /* _VM_H_ */

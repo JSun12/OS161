@@ -127,9 +127,9 @@ TODO: acquire locks in update_pt_entries. namely pid lock and proc lock.
 #define NOSWAPPABLE    3     /* No entries in the coremap are swappable */
 
 /* Page Daemon swapping definitions */
-#define SWAP_OUT_COUNT    0x1
-#define NUM_FREE_PPAGES   0x8
-#define DAEMON_EVICT_NUM  0x8
+#define SWAP_OUT_COUNT    1
+#define NUM_FREE_PPAGES   8
+#define DAEMON_EVICT_NUM  8
 #define MIN_FREE_PAGES    4
 #define SWAP_ON 1
 

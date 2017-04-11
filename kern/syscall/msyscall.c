@@ -14,8 +14,6 @@ extern struct cv *global_cv;
 extern p_page_t last_page;
 extern size_t cm_counter;
 
-#define MIN_FREE_PAGES    4
-
 /*
 Get the number of pages to be allocated between old and new places in l1 & l2
 */
@@ -113,7 +111,7 @@ allocate_sbrk(struct l2_pt *l2_pt, v_page_l1_t old_l1, v_page_l2_t old_l2, v_pag
 }
 
 /*
-There is some memory leak going on with sbrk
+XXX: There is some memory leak going on with sbrk
 */
 int
 sys_sbrk(ssize_t amount, int32_t *retval0)

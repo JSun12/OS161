@@ -33,7 +33,6 @@ p_page_t last_page; /* One page past the last free physical page in RAM */
 p_page_t first_page_swap; /* First physical page number that is allocated to swap */
 p_page_t last_page_swap; /* One page past the last free physical page SWAP */
 
-// TODO: maybe this couting policy is ugly. If it works, clean it up by using proper types, etc.
 static struct vnode *swap_disk;
 static const char swap_dir[] = "lhd0raw:";
 
@@ -80,8 +79,6 @@ p_page_used(p_page_t p_page)
     return used;
 }
 
-
-// TODO: change this to a for loop
 static
 int
 find_free(size_t npages, p_page_t *start)
@@ -263,7 +260,6 @@ vm_bootstrap()
 void
 swap_bootstrap()
 {
-    // TODO: this is probably not appropriate
     int ret;
     char dir[sizeof(swap_dir)];
     strcpy(dir, swap_dir);
@@ -347,7 +343,6 @@ free_kpages(vaddr_t addr)
 
 //////////////////////////////////////////////////////////////////////////////////////////
 
-// TODO: Test this function
 void
 vm_tlbshootdown_all()
 {
@@ -355,7 +350,6 @@ vm_tlbshootdown_all()
         tlb_write(TLBHI_INVALID(i), TLBLO_INVALID(), i);
     }
 }
-
 
 
 void
@@ -372,6 +366,7 @@ vm_tlbshootdown(const struct tlbshootdown *tlbsd)
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////
+
 /*
 Swapable pages are user data pages and l1 page tables.
 */
@@ -414,17 +409,17 @@ entry_recently_used(p_page_t p_page)
 
     int spl = splhigh();
 
-	uint32_t entryhi;
-	uint32_t entrylo;
-	uint32_t index;
+    uint32_t entryhi;
+    uint32_t entrylo;
+    uint32_t index;
 
-	for (index = 0; index < NUM_TLB; index++) {
-		tlb_read(&entryhi, &entrylo, index);
+    for (index = 0; index < NUM_TLB; index++) {
+    tlb_read(&entryhi, &entrylo, index);
         if (p_page == TLBADDR_TO_PAGE(entrylo & TLBLO_PPAGE)) {
             splx(spl);
             return true;
         }
-	}
+    }
 
     splx(spl);
 
@@ -607,7 +602,7 @@ swap_out()
 
             result = find_free_swap(&swap_to_page);
             if (result) {
-                KASSERT(0); // debugging
+                //KASSERT(0); // debugging
                 spinlock_release(&cm_spinlock);
                 return result;
             }
@@ -617,7 +612,7 @@ swap_out()
 
             struct uio *u = swap_evict_uio(swap_to_page);
             if (u == NULL) {
-                KASSERT(0); // debugging
+                //KASSERT(0); // debugging
                 return ENOMEM;
             }
 
@@ -659,7 +654,6 @@ swap_in(p_page_t p_page, p_page_t old_p_page)
 
     struct uio *u = swap_load_uio(p_page, old_p_page);
     if (u == NULL) {
-        KASSERT(0);
         return ENOMEM;
     }
 
@@ -685,7 +679,6 @@ swap_in_data(p_page_t *p_page_ret)
     p_page_t new_page = first_alloc_page;
     result = find_free(1, &new_page);
     if (result) {
-        KASSERT(0); // debugging
         return result;
     }
 
@@ -767,7 +760,6 @@ get_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2, struct l1_pt **l1_pt_ret, bool 
     if (in_swap(p_page)) {
         result = swap_in_data(&p_page);
         if (result) {
-            KASSERT(0); // debugging
             spinlock_release(&cm_spinlock);
             return result;
         }
@@ -777,7 +769,6 @@ get_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2, struct l1_pt **l1_pt_ret, bool 
         spinlock_release(&cm_spinlock);
         result = l1_create(&l1_pt);
         if (result) {
-            KASSERT(0); // debugging
             return result;
         }
 
@@ -808,7 +799,6 @@ get_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2, struct l1_pt **l1_pt_ret, bool 
         l1_pt = (struct l1_pt*) PADDR_TO_KVADDR(PAGE_TO_ADDR(p_page));
     }
 
-
     *l1_pt_ret = l1_pt;
 
     return 0;
@@ -829,7 +819,6 @@ l1_alloc_page(struct l1_pt *l1_pt, v_page_l1_t v_l1, v_page_t v_page, p_page_t *
     p_page_t p_page = first_alloc_page;
     result = find_free(1, &p_page);
     if (result) {
-        KASSERT(0); // debugging
         spinlock_release(&cm_spinlock);
         return result;
     }
@@ -908,7 +897,6 @@ copy_user_data(struct l1_pt *l1_pt, v_page_l1_t v_l1, p_page_t old_page,
     p_page_t p_page = first_alloc_page;
     result = find_free(1, &p_page);
     if (result) {
-        KASSERT(0); // debugging
         return result;
     }
 
@@ -968,7 +956,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     lock_acquire(global_lock);
 
     if (SWAP_ON){
-        swap_out(); // not good because it makes vm fault slow
+        swap_out();
     }
 
     while (!enough_free()) {
@@ -1001,7 +989,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         bool writable = (faulttype == VM_FAULT_READONLY && !(l2_entry & ENTRY_WRITABLE));
         result = get_l1_pt(l2_pt, v_l2, &l1_pt, writable);
         if (result) {
-            KASSERT(0); // debugging
+            //KASSERT(0); // debugging
             lock_release(global_lock);
             return result;
         }
@@ -1009,7 +997,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     } else {
         result = add_l1_pt(l2_pt, v_l2, &l1_pt);
         if (result) {
-            KASSERT(0); // debugging
+            //KASSERT(0); // debugging
             lock_release(global_lock);
             return result;
         }
@@ -1086,19 +1074,19 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     int spl = splhigh();
 
-	uint32_t entryhi2;
-	uint32_t entrylo2;
-	uint32_t index;
+    uint32_t entryhi2;
+    uint32_t entrylo2;
+    uint32_t index;
     bool written = false;
 
-	for (index = 0; index < NUM_TLB; index++) {
-		tlb_read(&entryhi2, &entrylo2, index);
+    for (index = 0; index < NUM_TLB; index++) {
+    tlb_read(&entryhi2, &entrylo2, index);
         if ((entryhi & TLBHI_VPAGE) == (entryhi2 & TLBHI_VPAGE)) {
             tlb_write(entryhi, entrylo, index);
             written = true;
             break;
         }
-	}
+    }
 
     if (!written) {
         tlb_random(entryhi, entrylo);
@@ -1122,7 +1110,7 @@ free_vpage(struct l2_pt *l2_pt, v_page_l2_t v_l2, v_page_l1_t v_l1)
 
     result = get_l1_pt(l2_pt, v_l2, &l1_pt, true);
     if (result) {
-        KASSERT(0); // debugging
+        //KASSERT(0); // debugging
         return;
     }
 

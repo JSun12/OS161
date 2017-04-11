@@ -22,7 +22,7 @@ extern struct cm *cm;
 extern struct spinlock cm_spinlock;
 extern size_t cm_counter;
 
-extern struct wchan *io_wc; 
+extern struct wchan *io_wc;
 extern bool io_flag;
 
 int
@@ -56,15 +56,10 @@ void
 tlb_invalidate() {
 	int spl = splhigh();
 
-	uint32_t entryhi;
-	uint32_t entrylo;
 	uint32_t index;
 
 	for (index = 0; index < NUM_TLB; index++) {
-		tlb_read(&entryhi, &entrylo, index);
-		// entrylo = entrylo & (~TLB_VALID_BIT);
-		entrylo = 0;
-		tlb_write(entryhi, entrylo, index);
+	    tlb_write(TLBHI_INVALID(index), TLBLO_INVALID(), index);
 	}
 
 	splx(spl);
@@ -117,7 +112,7 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
         cv_wait(global_cv, global_lock);
     }
 
-	tlb_invalidate();	
+	tlb_invalidate();
 
 	struct l2_pt *l2_pt_new = newas->l2_pt;
 	struct l2_pt *l2_pt_old = old->l2_pt;
@@ -140,7 +135,7 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 
 			cm_incref(p_page_l1);
 			add_pid8(p_page_l1, pid);
-				
+
 			spinlock_release(&cm_spinlock);
 
 			for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
@@ -177,7 +172,7 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 void
 as_destroy(struct addrspace *as, pid_t pid)
 {
-	KASSERT(as != NULL); 
+	KASSERT(as != NULL);
 	KASSERT(as->l2_pt != NULL);
 
 	/* The process for the old address space must still be in the pid table */
@@ -229,18 +224,13 @@ as_activate(void)
 	if (as == NULL) {
 		return;
 	}
-
 	tlb_invalidate();
 }
 
 void
 as_deactivate(void)
 {
-	/*
-	 * Write this. For many designs it won't need to actually do
-	 * anything. See proc.c for an explanation of why it (might)
-	 * be needed.
-	 */
+	/* Nothing */
 }
 
 /*
@@ -263,10 +253,14 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 	by load_elf to allocate space for user program code and static variables.
 	Thus, the top of this region should be available for heap. This implementation
 	finds this top.
-
-	TODO: However, there might be more we should do to implement
-	as_define_region properly.
 	*/
+	(void)as;
+	(void)vaddr;
+	(void)sz;
+	(void)readable;
+	(void)writeable;
+	(void)executable;
+
 	vaddr_t region_end = vaddr + sz;
 	if (region_end > as->heap_base) {
 		vaddr_t page_aligned_end = VPAGE_ADDR_MASK & region_end;
@@ -276,21 +270,13 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 		as->brk = as->heap_base;
 	}
 
-	(void)as;
-	(void)vaddr;
-	(void)sz;
-	(void)readable;
-	(void)writeable;
-	(void)executable;
 	return 0;
 }
 
 int
 as_prepare_load(struct addrspace *as)
 {
-	/*
-	 * Write this.
-	 */
+	/* Nothing */
 
 	(void)as;
 	return 0;
@@ -299,9 +285,7 @@ as_prepare_load(struct addrspace *as)
 int
 as_complete_load(struct addrspace *as)
 {
-	/*
-	 * Write this.
-	 */
+	/* Nothing */
 
 	(void)as;
 	return 0;
@@ -310,10 +294,6 @@ as_complete_load(struct addrspace *as)
 int
 as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 {
-	/*
-	 * Write this.
-	 */
-
 	(void)as;
 
 	/* Initial user-level stack pointer */

@@ -126,6 +126,13 @@ TODO: acquire locks in update_pt_entries. namely pid lock and proc lock.
 #define ENOUGHFREE     2     /* Enough free physical pages; no need to swap out */
 #define NOSWAPPABLE    3     /* No entries in the coremap are swappable */
 
+/* Page Daemon swapping definitions */
+#define SWAP_OUT_COUNT    0x1
+#define NUM_FREE_PPAGES   0x8
+#define DAEMON_EVICT_NUM  0x8
+#define MIN_FREE_PAGES    4
+#define SWAP_ON 1
+
 
 /*
 The coremap supports 16MB of physical RAM, since cm_entry_t is a 4 bytes,
@@ -205,7 +212,6 @@ struct l1_pt {
     l1_entry_t l1_entries[NUM_L1PT_ENTRIES];
 };
 
-
 /* Global coremap functions */
 bool in_ram(p_page_t);
 bool in_swap(p_page_t);
@@ -251,9 +257,7 @@ void free_kpages(vaddr_t);
 void vm_tlbshootdown_all(void);
 void vm_tlbshootdown(const struct tlbshootdown *);
 
-
-int sys_sbrk(ssize_t, int32_t *);
-
+/* Page manipulation */
 void free_vpage(struct l2_pt *, v_page_l2_t, v_page_l1_t);
 void free_l1_pt(struct l2_pt *, v_page_l2_t);
 int add_ppage(struct l2_pt *, v_page_l2_t, v_page_l1_t);

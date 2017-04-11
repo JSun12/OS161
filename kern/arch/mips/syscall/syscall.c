@@ -39,6 +39,7 @@
 #include <copyinout.h>
 #include <fsyscall.h>
 #include <psyscall.h>
+#include <msyscall.h>
 #include <syscall.h>
 #include <vm.h>
 #include <kern/wait.h>

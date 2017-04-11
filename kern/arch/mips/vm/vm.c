@@ -24,9 +24,6 @@ struct coremap *cm;
 struct spinlock cm_spinlock = SPINLOCK_INITIALIZER;
 volatile size_t cm_counter = 0;
 
-// TODO: probs need to change for tlb shootdown
-// struct spinlock tlb_spinlock = SPINLOCK_INITIALIZER;
-
 /* Variable indicating paging bounds. Shared with msyscall.c */
 p_page_t first_alloc_page; /* First physical page that can be dynamically allocated */
 p_page_t last_page; /* One page past the last free physical page in RAM */
@@ -495,6 +492,7 @@ swap_load_uio(p_page_t p_page, p_page_t old_p_page)
     return u;
 }
 
+
 static
 void
 swap_uio_cleanup(struct uio *u)
@@ -506,12 +504,16 @@ swap_uio_cleanup(struct uio *u)
     kfree(u);
 }
 
-// return a proper error
-// maybe get spinlock here
+// TODO: Use the return value for error checking in rest of code
+/*
+Updates the location of a page in the page tables of other processes.
+*/
 static
-void
+int
 update_pt_entries(p_page_t swap_to_page, p_page_t old_page)
 {
+    KASSERT(spinlock_do_i_hold(&cm_spinlock));
+
     size_t refs = cm_getref(swap_to_page);
     v_page_t v_page = cm->cm_entries[swap_to_page] & VP_MASK;
     bool is_l1 = v_page >= 0x00080000;
@@ -555,7 +557,7 @@ update_pt_entries(p_page_t swap_to_page, p_page_t old_page)
             if (in_swap(p_page)) {
                 result = swap_in_data(&p_page);
                 if (result) {
-                    KASSERT(0);
+                    return result;
                 }
             }
 
@@ -565,6 +567,7 @@ update_pt_entries(p_page_t swap_to_page, p_page_t old_page)
             l1_pt->l1_entries[v_l1] = l1_pt->l1_entries[v_l1] | swap_to_page;
         }
     }
+    return 0;
 }
 
 static
@@ -602,7 +605,6 @@ swap_out()
 
             result = find_free_swap(&swap_to_page);
             if (result) {
-                //KASSERT(0); // debugging
                 spinlock_release(&cm_spinlock);
                 return result;
             }
@@ -612,7 +614,7 @@ swap_out()
 
             struct uio *u = swap_evict_uio(swap_to_page);
             if (u == NULL) {
-                //KASSERT(0); // debugging
+                spinlock_release(&cm_spinlock);
                 return ENOMEM;
             }
 
@@ -651,6 +653,7 @@ swap_in(p_page_t p_page, p_page_t old_p_page)
     KASSERT(cm->cm_entries[old_p_page] & PP_USED);
     KASSERT(in_ram(p_page));
     KASSERT(in_swap(old_p_page));
+    KASSERT(spinlock_do_i_hold(&cm_spinlock));
 
     struct uio *u = swap_load_uio(p_page, old_p_page);
     if (u == NULL) {
@@ -673,6 +676,7 @@ swap_in_data(p_page_t *p_page_ret)
     p_page_t p_page = *p_page_ret;
     KASSERT(in_swap(p_page));
     KASSERT(entry_swappable(p_page));
+    KASSERT(spinlock_do_i_hold(&cm_spinlock));
 
     int result;
 
@@ -700,7 +704,7 @@ enough_free()
     return last_page - cm_counter >= MIN_FREE_PAGES;
 }
 
-// daemon yeild after a write, right?
+// daemon yield after a write, right?
 void
 paging_daemon(void *data1, unsigned long data2)
 {
@@ -755,18 +759,18 @@ get_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2, struct l1_pt **l1_pt_ret, bool 
 
     p_page_t p_page = l2_pt->l2_entries[v_l2] & PAGE_MASK;
 
-    spinlock_acquire(&cm_spinlock);
-
     if (in_swap(p_page)) {
+        spinlock_acquire(&cm_spinlock);
+
         result = swap_in_data(&p_page);
+
+        spinlock_release(&cm_spinlock);
         if (result) {
-            spinlock_release(&cm_spinlock);
             return result;
         }
     }
 
     if (cm_getref(p_page) > 1 && writable) {
-        spinlock_release(&cm_spinlock);
         result = l1_create(&l1_pt);
         if (result) {
             return result;
@@ -795,7 +799,6 @@ get_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2, struct l1_pt **l1_pt_ret, bool 
 
         spinlock_release(&cm_spinlock);
     } else {
-        spinlock_release(&cm_spinlock);
         l1_pt = (struct l1_pt*) PADDR_TO_KVADDR(PAGE_TO_ADDR(p_page));
     }
 
@@ -857,7 +860,6 @@ add_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2, struct l1_pt **l1_pt_ret)
 
     result = l1_create(&l1_pt);
     if (result) {
-        spinlock_release(&cm_spinlock);
         return result;
     }
 

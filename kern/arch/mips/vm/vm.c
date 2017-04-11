@@ -754,8 +754,8 @@ paging_daemon(void *data1, unsigned long data2)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /*
-Gets an l1 page table from the l2 page table entry. The l2_pt must belong to curproc, 
-and the entry must be valid. This functions swaps in the l1 page table if it is in 
+Gets an l1 page table from the l2 page table entry. The l2_pt must belong to curproc,
+and the entry must be valid. This functions swaps in the l1 page table if it is in
 swap. If writable is true, then we copy the page table if it has a > 1 ref count.
 */
 int
@@ -801,7 +801,7 @@ get_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2, struct l1_pt **l1_pt_ret, bool 
                                 | new_p_page;
 
         spinlock_acquire(&cm_spinlock);
-                      
+
         cm_incref(new_p_page);
         add_pid8(new_p_page, curproc->pid);
 
@@ -817,7 +817,7 @@ get_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2, struct l1_pt **l1_pt_ret, bool 
 
     *l1_pt_ret = l1_pt;
 
-    return 0; 
+    return 0;
 }
 
 /*
@@ -866,7 +866,7 @@ l1_alloc_page(struct l1_pt *l1_pt, v_page_l1_t v_l1, v_page_t v_page, p_page_t *
 Assigns the l2 entry a new, empty l1 page table.
 */
 int
-add_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2, struct l1_pt **l1_pt_ret) 
+add_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2, struct l1_pt **l1_pt_ret)
 {
     KASSERT(!(l2_pt->l2_entries[v_l2] & ENTRY_VALID));
     struct l1_pt *l1_pt;
@@ -874,7 +874,6 @@ add_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2, struct l1_pt **l1_pt_ret)
 
     result = l1_create(&l1_pt);
     if (result) {
-        KASSERT(0); // debugging
         spinlock_release(&cm_spinlock);
         return result;
     }
@@ -905,12 +904,12 @@ Creates a new entry for l1_pt and v_l1, and copies the contents of old_page over
 Note that the cm_spinlock must be acquired before calling.
 */
 int
-copy_user_data(struct l1_pt *l1_pt, v_page_l1_t v_l1, p_page_t old_page, 
+copy_user_data(struct l1_pt *l1_pt, v_page_l1_t v_l1, p_page_t old_page,
                                     v_page_t v_page, p_page_t *p_page_ret)
 {
-    KASSERT(v_l1 == L1_PNUM(PAGE_TO_ADDR(v_page)));  
-    KASSERT(spinlock_do_i_hold(&cm_spinlock));  
-    int result; 
+    KASSERT(v_l1 == L1_PNUM(PAGE_TO_ADDR(v_page)));
+    KASSERT(spinlock_do_i_hold(&cm_spinlock));
+    int result;
 
     p_page_t p_page = first_alloc_page;
     result = find_free(1, &p_page);
@@ -950,7 +949,7 @@ copy_user_data(struct l1_pt *l1_pt, v_page_l1_t v_l1, p_page_t old_page,
 Removes the reference of the pid to the p_page, and frees it if there are no more references.
 */
 void
-release_ppage(p_page_t p_page, pid_t pid) 
+release_ppage(p_page_t p_page, pid_t pid)
 {
     spinlock_acquire(&cm_spinlock);
 
@@ -977,7 +976,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     if (SWAP_ON){
         swap_out(); // not good because it makes vm fault slow
     }
-    
+
     while (!enough_free()) {
         cv_wait(global_cv, global_lock);
     }
@@ -1009,9 +1008,9 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         result = get_l1_pt(l2_pt, v_l2, &l1_pt, writable);
         if (result) {
             KASSERT(0); // debugging
-            lock_release(global_lock); 
+            lock_release(global_lock);
             return result;
-        }       
+        }
 
     } else {
         result = add_l1_pt(l2_pt, v_l2, &l1_pt);
@@ -1061,7 +1060,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                     lock_release(global_lock);
                 }
             }
-            
+
             p_page = old_page;
         }
 
@@ -1154,9 +1153,11 @@ free_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2)
     }
 }
 
-//TODO: Deal with return value
+/*
+Adds a physical apge to the specified l1 page table
+*/
 int
-add_ppage(struct l2_pt *l2_pt, v_page_l2_t v_l2, v_page_l1_t v_l1) 
+add_ppage(struct l2_pt *l2_pt, v_page_l2_t v_l2, v_page_l1_t v_l1)
 {
     KASSERT(l2_pt != NULL);
     KASSERT(l2_pt->l2_entries[v_l2] & ENTRY_VALID);
@@ -1165,14 +1166,107 @@ add_ppage(struct l2_pt *l2_pt, v_page_l2_t v_l2, v_page_l1_t v_l1)
 
     result = get_l1_pt(l2_pt, v_l2, &l1_pt, true);
     if (result) {
-        KASSERT(0); // debugging
         return result;
     }
 
     result = l1_alloc_page(l1_pt, v_l1, PNUM_TO_PAGE(v_l2, v_l1), NULL);
     if (result) {
-        KASSERT(0); //debugging
         return result;
+    }
+
+    return 0;
+}
+/*
+Get the number of pages to be allocated between old and new places in l1 & l2
+*/
+static
+int
+get_num_used(v_page_l1_t old_l1, v_page_l2_t old_l2, v_page_l1_t new_l1, v_page_l2_t new_l2)
+{
+    int num_used = 0;
+    if (old_l2 == new_l2){
+        num_used += (new_l1 - old_l1);
+    } else {
+        num_used += (new_l2 - old_l2 - 1) * NUM_L1PT_ENTRIES;
+        num_used += NUM_L1PT_ENTRIES - old_l1;
+        num_used += new_l1;
+    }
+    return num_used;
+}
+
+/*
+Frees pages between the old and new places in l1 & l2 in a loop
+*/
+static
+void
+free_sbrk(struct l2_pt *l2_pt, v_page_l1_t old_l1, v_page_l2_t old_l2, v_page_l1_t new_l1, v_page_l2_t new_l2){
+    if (old_l2 == new_l2) {
+        for (v_page_l1_t v_l1 = new_l1; v_l1 < old_l1; v_l1++) {
+            free_vpage(l2_pt, new_l2, v_l1);
+        }
+    } else {
+        for (v_page_l2_t v_l2 = new_l2 + 1; v_l2 < old_l2; v_l2++) {
+            for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
+                free_vpage(l2_pt, v_l2, v_l1);
+            }
+
+            free_l1_pt(l2_pt, v_l2);
+        }
+
+        for (v_page_l1_t v_l1 = 0; v_l1 < old_l1; v_l1++) {
+            free_vpage(l2_pt, old_l2, v_l1);
+        }
+
+        free_l1_pt(l2_pt, old_l2);
+
+        for (v_page_l1_t v_l1 = new_l1; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
+            free_vpage(l2_pt, new_l2, v_l1);
+        }
+    }
+}
+
+/*
+Allocates all the pages between the old and new places in l1 & l2 in a loop
+*/
+static
+int
+allocate_sbrk(struct l2_pt *l2_pt, v_page_l1_t old_l1, v_page_l2_t old_l2, v_page_l1_t new_l1, v_page_l2_t new_l2)
+{
+    int result;
+
+    if (!(l2_pt->l2_entries[old_l2] & ENTRY_VALID)) {
+        result = add_l1_pt(l2_pt, old_l2, NULL);
+        if (result) return result;
+    }
+
+    if (old_l2 == new_l2){
+        for (v_page_l1_t v_l1 = old_l1; v_l1 < new_l1; v_l1++) {
+            result = add_ppage(l2_pt, old_l2, v_l1);
+            if (result) return result;
+        }
+    } else {
+        for (v_page_l2_t v_l2 = old_l2 + 1; v_l2 < new_l2; v_l2++) {
+            result = add_l1_pt(l2_pt, v_l2, NULL);
+            if (result) return result;
+
+            for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
+                result = add_ppage(l2_pt, v_l2, v_l1);
+                if (result) return result;
+            }
+        }
+
+        for (v_page_l1_t v_l1 = old_l1; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
+            result = add_ppage(l2_pt, old_l2, v_l1);
+            if (result) return result;
+        }
+
+        result = add_l1_pt(l2_pt, new_l2, NULL);
+        if (result) return result;
+
+        for (v_page_l1_t v_l1 = 0; v_l1 < new_l1; v_l1++) {
+            result = add_ppage(l2_pt, new_l2, v_l1);
+            if (result) return result;
+        }
     }
 
     return 0;
@@ -1189,7 +1283,7 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
     }
 
     lock_acquire(global_lock);
-    
+
     while (!enough_free()) {
         cv_wait(global_cv, global_lock);
     }
@@ -1199,6 +1293,7 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
     vaddr_t stack_top = as->stack_top;
     vaddr_t old_heap_end = as->brk;
     vaddr_t new_heap_end = old_heap_end + amount;
+    
     if (new_heap_end < as->heap_base) {
         lock_release(global_lock);
         return EINVAL;
@@ -1221,81 +1316,25 @@ sys_sbrk(ssize_t amount, int32_t *retval0)
     v_page_l1_t new_l1 = L1_PNUM(new_heap_end);
     struct l2_pt *l2_pt = as->l2_pt;
 
-    // Free physical pages of deallocated virtual pages
     if (new_heap_end < old_heap_end) {
-        if (old_l2 == new_l2) {
-            for (v_page_l1_t v_l1 = new_l1; v_l1 < old_l1; v_l1++) {
-                free_vpage(l2_pt, new_l2, v_l1);
-            }
-        } else {
-            for (v_page_l2_t v_l2 = new_l2 + 1; v_l2 < old_l2; v_l2++) {
-                for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
-                    free_vpage(l2_pt, v_l2, v_l1);
-                }
-
-                free_l1_pt(l2_pt, v_l2);
-            }
-
-            for (v_page_l1_t v_l1 = 0; v_l1 < old_l1; v_l1++) {
-                free_vpage(l2_pt, old_l2, v_l1);
-            }
-
-            free_l1_pt(l2_pt, old_l2);
-
-            for (v_page_l1_t v_l1 = new_l1; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
-                free_vpage(l2_pt, new_l2, v_l1);
-            }
-        }
-
+        free_sbrk(l2_pt, old_l1, old_l2, new_l1, new_l2);
         tlb_invalidate();
+    }
+    else if (new_heap_end > old_heap_end)
+    {
+        int result;
+        int used = get_num_used(old_l1, old_l2, new_l1, new_l2);
 
-    } else if (new_heap_end > old_heap_end){
-
-        // Check to see if we have enough memory
-        // TODO: Increase code reuse between this and the above case
-        int num_used = 0;
-        if (old_l2 == new_l2){
-            num_used += (new_l1 - old_l1);
-        } else {
-            num_used += (new_l2 - old_l2 - 1) * NUM_L1PT_ENTRIES;
-            num_used += NUM_L1PT_ENTRIES - old_l1;
-            num_used += new_l1;
-        }
-        //XXX: This >= is required to pass sbrk test 10. This indicates that one of the free_pages isn't
-        // free, or I'm allocating one too many pages
         int32_t free_pages = last_page - cm_counter;
-        if (num_used > free_pages - MIN_FREE_PAGES){
-            *retval0 = -1;
+        if (used > free_pages - MIN_FREE_PAGES){
             lock_release(global_lock);
+            *retval0 = -1;
             return ENOMEM;
         }
 
-        if (!(l2_pt->l2_entries[old_l2] & ENTRY_VALID)) {
-            add_l1_pt(l2_pt, old_l2, NULL);
-        }
-        
-        if (old_l2 == new_l2){
-            for (v_page_l1_t v_l1 = old_l1; v_l1 < new_l1; v_l1++) {
-                add_ppage(l2_pt, old_l2, v_l1);
-            }
-        } else {
-            for (v_page_l2_t v_l2 = old_l2 + 1; v_l2 < new_l2; v_l2++) {
-                add_l1_pt(l2_pt, v_l2, NULL);
-
-                for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
-                    add_ppage(l2_pt, v_l2, v_l1);
-                }
-            }
-
-            for (v_page_l1_t v_l1 = old_l1; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
-                add_ppage(l2_pt, old_l2, v_l1);
-            }
-
-            add_l1_pt(l2_pt, new_l2, NULL);
-
-            for (v_page_l1_t v_l1 = 0; v_l1 < new_l1; v_l1++) {
-                add_ppage(l2_pt, new_l2, v_l1);
-            }
+        result = allocate_sbrk(l2_pt, old_l1, old_l2, new_l1, new_l2);
+        if (result){
+            panic("Kernel checked for empty pages, found them, but could not use them.");
         }
     }
 

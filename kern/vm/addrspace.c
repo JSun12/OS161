@@ -25,6 +25,7 @@ extern size_t cm_counter;
 extern struct wchan *io_wc;
 extern bool io_flag;
 
+
 int
 l1_create(struct l1_pt **l1_pt)
 {
@@ -83,7 +84,7 @@ as_create(void)
 
 	l2_init(as->l2_pt);
 	as->heap_base = 0;
-	as->stack_top = USERSTACK - STACK_SIZE; // TODO get proper stack
+	as->stack_top = USERSTACK - STACK_SIZE;
 	as->brk = 0;
 
 	return as;
@@ -114,6 +115,10 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 
 	tlb_invalidate();
 
+	newas->heap_base = old->heap_base;
+	newas->stack_top = old->stack_top;
+    newas->brk = old->brk;
+
 	struct l2_pt *l2_pt_new = newas->l2_pt;
 	struct l2_pt *l2_pt_old = old->l2_pt;
 	struct l1_pt *l1_pt_old;
@@ -124,7 +129,7 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 		if (l2_pt_old->l2_entries[v_l2] & ENTRY_VALID) {
 			result = get_l1_pt(l2_pt_old, v_l2, &l1_pt_old, false);
 			if (result) {
-				KASSERT(0); // debugging
+				as_destroy(newas, pid);
 				lock_release(global_lock);
 				return result;
 			}
@@ -157,13 +162,7 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 		l2_pt_new->l2_entries[v_l2] = l2_pt_old->l2_entries[v_l2];
 	}
 
-	newas->heap_base = old->heap_base;
-	newas->stack_top = old->stack_top;
-    newas->brk = old->brk;
 	*ret = newas;
-
-	// TODO: change the dirty bits of the correct process, not just invalidate all tlb entries
-
 
 	lock_release(global_lock);
 	return 0;
@@ -191,9 +190,7 @@ as_destroy(struct addrspace *as, pid_t pid)
 		if (l2_pt->l2_entries[v_l2] & ENTRY_VALID) {
 			result = get_l1_pt(l2_pt, v_l2, &l1_pt, false);
 			if (result) {
-				KASSERT(0); // debugging
-				lock_release(global_lock);
-				return;
+				continue;
 			}
 
 			for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {

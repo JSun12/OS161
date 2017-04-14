@@ -968,7 +968,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     struct addrspace *as = curproc->p_addrspace;
     pid_t pid = curproc->pid;
 
-    // TODO: do a proper address check (make sure kernel addresses aren't called)
     if (as->brk <= faultaddress && faultaddress < as->stack_top) {
         lock_release(global_lock);
         return SIGSEGV;
@@ -987,11 +986,10 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     /* Get the l1 page table. */
     if (l2_entry & ENTRY_VALID) {
-        /* checks if a process must be able to modify the l1 page table. */
+        /* Checks if a process must be able to modify the l1 page table. */
         bool writable = (faulttype == VM_FAULT_READONLY && !(l2_entry & ENTRY_WRITABLE));
         result = get_l1_pt(l2_pt, v_l2, &l1_pt, writable);
         if (result) {
-            //KASSERT(0); // debugging
             lock_release(global_lock);
             return result;
         }
@@ -999,7 +997,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     } else {
         result = add_l1_pt(l2_pt, v_l2, &l1_pt);
         if (result) {
-            //KASSERT(0); // debugging
             lock_release(global_lock);
             return result;
         }
@@ -1025,7 +1022,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             if (cm_getref(old_page) > 1) {
                 result = copy_user_data(l1_pt, v_l1, old_page, ADDR_TO_PAGE(fault_page), &p_page);
                 if (result) {
-                    KASSERT(0); // debugging
                     spinlock_release(&cm_spinlock);
                     lock_release(global_lock);
                     return result;
@@ -1039,7 +1035,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             if (in_swap(old_page)) {
                 result = swap_in_data(&old_page);
                 if (result) {
-                    KASSERT(0); // debugging
                     spinlock_release(&cm_spinlock);
                     lock_release(global_lock);
                 }
@@ -1053,7 +1048,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     } else {
         result = l1_alloc_page(l1_pt, v_l1, ADDR_TO_PAGE(fault_page), &p_page);
         if (result) {
-            KASSERT(0); // debugging
             lock_release(global_lock);
             return result;
         }
@@ -1112,7 +1106,6 @@ free_vpage(struct l2_pt *l2_pt, v_page_l2_t v_l2, v_page_l1_t v_l1)
 
     result = get_l1_pt(l2_pt, v_l2, &l1_pt, true);
     if (result) {
-        //KASSERT(0); // debugging
         return;
     }
 
@@ -1123,7 +1116,7 @@ free_vpage(struct l2_pt *l2_pt, v_page_l2_t v_l2, v_page_l1_t v_l1)
         release_ppage(p_page, curproc->pid);
     }
 
-    l1_pt->l1_entries[v_l1] = 0; // maybe make this more explicit
+    l1_pt->l1_entries[v_l1] = 0;
 }
 
 void

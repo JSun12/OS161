@@ -122,11 +122,6 @@ paddr_t ram_getfirstfree(void);
  */
 
 struct tlbshootdown {
-	//NOTE: Are we sure we want to use virtual page #, and physical address
-	// 		I suggest either both virutal & physical page #
-	// 		OR both virutal and physical page address
-	//NOTE: The paddr_t is not needed to do find a page with tlb_probe. Therefore we leave it out
-
 	vaddr_t v_page_num;
 	pid_t pid;
 };

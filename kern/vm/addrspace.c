@@ -29,83 +29,83 @@ extern bool io_flag;
 int
 l1_create(struct l1_pt **l1_pt)
 {
-	struct l1_pt *l1_pt_new;
+    struct l1_pt *l1_pt_new;
     l1_pt_new = kmalloc(sizeof(struct l1_pt));
     if (l1_pt_new == NULL) {
         return ENOMEM;
     }
 
-	KASSERT(((vaddr_t) l1_pt_new) % PAGE_SIZE == 0);
+    KASSERT(((vaddr_t) l1_pt_new) % PAGE_SIZE == 0);
 
     for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
         l1_pt_new->l1_entries[v_l1] = 0;
-	}
+    }
 
-	*l1_pt = l1_pt_new;
+    *l1_pt = l1_pt_new;
     return 0;
 }
 
 void
 l2_init(struct l2_pt *l2_pt)
 {
-	for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
-		l2_pt->l2_entries[v_l2] = 0;
-	}
+    for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
+        l2_pt->l2_entries[v_l2] = 0;
+    }
 }
 
 void
 tlb_invalidate() {
-	int spl = splhigh();
+    int spl = splhigh();
 
-	uint32_t index;
+    uint32_t index;
 
-	for (index = 0; index < NUM_TLB; index++) {
-	    tlb_write(TLBHI_INVALID(index), TLBLO_INVALID(), index);
-	}
+    for (index = 0; index < NUM_TLB; index++) {
+        tlb_write(TLBHI_INVALID(index), TLBLO_INVALID(), index);
+    }
 
-	splx(spl);
+    splx(spl);
 }
 
 struct addrspace *
 as_create(void)
 {
-	struct addrspace *as;
+    struct addrspace *as;
 
-	as = kmalloc(sizeof(struct addrspace));
-	if (as == NULL) {
-		return NULL;
-	}
+    as = kmalloc(sizeof(struct addrspace));
+    if (as == NULL) {
+        return NULL;
+    }
 
-	as->l2_pt = kmalloc(sizeof(struct l2_pt));
-	if (as->l2_pt == NULL) {
-		kfree(as);
-		return NULL;
-	}
+    as->l2_pt = kmalloc(sizeof(struct l2_pt));
+    if (as->l2_pt == NULL) {
+        kfree(as);
+        return NULL;
+    }
 
-	l2_init(as->l2_pt);
-	as->heap_base = 0;
-	as->stack_top = USERSTACK - STACK_SIZE;
-	as->brk = 0;
+    l2_init(as->l2_pt);
+    as->heap_base = 0;
+    as->stack_top = USERSTACK - STACK_SIZE;
+    as->brk = 0;
 
-	return as;
+    return as;
 }
 
 int
 as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
 {
-	/* The process for the new address space must already be in the pid table */
-	struct proc *proc = get_pid(pid);
-	KASSERT(proc != NULL);
-	KASSERT(proc->pid == pid);
-	KASSERT(proc->p_addrspace == *ret);
+    /* The process for the new address space must already be in the pid table */
+    struct proc *proc = get_pid(pid);
+    KASSERT(proc != NULL);
+    KASSERT(proc->pid == pid);
+    KASSERT(proc->p_addrspace == *ret);
 
-	struct addrspace *newas;
-	int result;
+    struct addrspace *newas;
+    int result;
 
-	newas = as_create();
-	if (newas==NULL) {
-		return ENOMEM;
-	}
+    newas = as_create();
+    if (newas==NULL) {
+        return ENOMEM;
+    }
 
     lock_acquire(global_lock);
 
@@ -113,121 +113,121 @@ as_copy(struct addrspace *old, struct addrspace **ret, pid_t pid)
         cv_wait(global_cv, global_lock);
     }
 
-	tlb_invalidate();
+    tlb_invalidate();
 
-	newas->heap_base = old->heap_base;
-	newas->stack_top = old->stack_top;
+    newas->heap_base = old->heap_base;
+    newas->stack_top = old->stack_top;
     newas->brk = old->brk;
 
-	struct l2_pt *l2_pt_new = newas->l2_pt;
-	struct l2_pt *l2_pt_old = old->l2_pt;
-	struct l1_pt *l1_pt_old;
+    struct l2_pt *l2_pt_new = newas->l2_pt;
+    struct l2_pt *l2_pt_old = old->l2_pt;
+    struct l1_pt *l1_pt_old;
 
-	for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
-		l2_pt_old->l2_entries[v_l2] = l2_pt_old->l2_entries[v_l2] & (~ENTRY_WRITABLE);
+    for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
+        l2_pt_old->l2_entries[v_l2] = l2_pt_old->l2_entries[v_l2] & (~ENTRY_WRITABLE);
 
-		if (l2_pt_old->l2_entries[v_l2] & ENTRY_VALID) {
-			result = get_l1_pt(l2_pt_old, v_l2, &l1_pt_old, false);
-			if (result) {
-				as_destroy(newas, pid);
-				lock_release(global_lock);
-				return result;
-			}
+        if (l2_pt_old->l2_entries[v_l2] & ENTRY_VALID) {
+            result = get_l1_pt(l2_pt_old, v_l2, &l1_pt_old, false);
+            if (result) {
+                as_destroy(newas, pid);
+                lock_release(global_lock);
+                return result;
+            }
 
-			p_page_t p_page_l1 = ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt_old));
+            p_page_t p_page_l1 = ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt_old));
 
-			spinlock_acquire(&cm_spinlock);
+            spinlock_acquire(&cm_spinlock);
 
-			cm_incref(p_page_l1);
-			add_pid8(p_page_l1, pid);
+            cm_incref(p_page_l1);
+            add_pid8(p_page_l1, pid);
 
-			spinlock_release(&cm_spinlock);
+            spinlock_release(&cm_spinlock);
 
-			for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
-				l1_pt_old->l1_entries[v_l1] = l1_pt_old->l1_entries[v_l1] & (~ENTRY_WRITABLE);
+            for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
+                l1_pt_old->l1_entries[v_l1] = l1_pt_old->l1_entries[v_l1] & (~ENTRY_WRITABLE);
 
-				if (l1_pt_old->l1_entries[v_l1] & ENTRY_VALID) {
-					p_page_t p_page = l1_pt_old->l1_entries[v_l1] & PAGE_MASK;
+                if (l1_pt_old->l1_entries[v_l1] & ENTRY_VALID) {
+                    p_page_t p_page = l1_pt_old->l1_entries[v_l1] & PAGE_MASK;
 
-					spinlock_acquire(&cm_spinlock);
+                    spinlock_acquire(&cm_spinlock);
 
-					cm_incref(p_page);
-					add_pid8(p_page, pid);
+                    cm_incref(p_page);
+                    add_pid8(p_page, pid);
 
-					spinlock_release(&cm_spinlock);
-				}
-			}
-		}
+                    spinlock_release(&cm_spinlock);
+                }
+            }
+        }
 
-		l2_pt_new->l2_entries[v_l2] = l2_pt_old->l2_entries[v_l2];
-	}
+        l2_pt_new->l2_entries[v_l2] = l2_pt_old->l2_entries[v_l2];
+    }
 
-	*ret = newas;
+    *ret = newas;
 
-	lock_release(global_lock);
-	return 0;
+    lock_release(global_lock);
+    return 0;
 }
 
 void
 as_destroy(struct addrspace *as, pid_t pid)
 {
-	KASSERT(as != NULL);
-	KASSERT(as->l2_pt != NULL);
+    KASSERT(as != NULL);
+    KASSERT(as->l2_pt != NULL);
 
-	/* The process for the old address space must still be in the pid table */
-	struct proc *proc = get_pid(pid);
-	KASSERT(proc != NULL);
-	KASSERT(proc->pid == pid);
+    /* The process for the old address space must still be in the pid table */
+    struct proc *proc = get_pid(pid);
+    KASSERT(proc != NULL);
+    KASSERT(proc->pid == pid);
 
     lock_acquire(global_lock);
-	tlb_invalidate();
+    tlb_invalidate();
 
-	struct l2_pt *l2_pt = as->l2_pt;
-	struct l1_pt *l1_pt;
-	int result;
+    struct l2_pt *l2_pt = as->l2_pt;
+    struct l1_pt *l1_pt;
+    int result;
 
-	for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
-		if (l2_pt->l2_entries[v_l2] & ENTRY_VALID) {
-			result = get_l1_pt(l2_pt, v_l2, &l1_pt, false);
-			if (result) {
-				continue;
-			}
+    for (v_page_l2_t v_l2 = 0; v_l2 < NUM_L2PT_ENTRIES; v_l2++) {
+        if (l2_pt->l2_entries[v_l2] & ENTRY_VALID) {
+            result = get_l1_pt(l2_pt, v_l2, &l1_pt, false);
+            if (result) {
+                continue;
+            }
 
-			for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
-				l1_entry_t l1_entry = l1_pt->l1_entries[v_l1];
+            for (v_page_l1_t v_l1 = 0; v_l1 < NUM_L1PT_ENTRIES; v_l1++) {
+                l1_entry_t l1_entry = l1_pt->l1_entries[v_l1];
 
-				if (l1_entry & ENTRY_VALID) {
-					p_page_t p_page = l1_entry & PAGE_MASK;
-					release_ppage(p_page, pid);
-				}
-			}
+                if (l1_entry & ENTRY_VALID) {
+                    p_page_t p_page = l1_entry & PAGE_MASK;
+                    release_ppage(p_page, pid);
+                }
+            }
 
-			release_ppage(ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt)), pid);
-		}
-	}
+            release_ppage(ADDR_TO_PAGE(KVADDR_TO_PADDR((vaddr_t) l1_pt)), pid);
+        }
+    }
 
-	kfree(as->l2_pt);
-	kfree(as);
+    kfree(as->l2_pt);
+    kfree(as);
 
-	lock_release(global_lock);
+    lock_release(global_lock);
 }
 
 void
 as_activate(void)
 {
-	struct addrspace *as;
+    struct addrspace *as;
 
-	as = proc_getas();
-	if (as == NULL) {
-		return;
-	}
-	tlb_invalidate();
+    as = proc_getas();
+    if (as == NULL) {
+        return;
+    }
+    tlb_invalidate();
 }
 
 void
 as_deactivate(void)
 {
-	/* Nothing */
+    /* Nothing */
 }
 
 /*
@@ -243,58 +243,58 @@ as_deactivate(void)
 
 int
 as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
-		 int readable, int writeable, int executable)
+         int readable, int writeable, int executable)
 {
-	/*
-	This function is implemented assuming that as_define_region is called
-	by load_elf to allocate space for user program code and static variables.
-	Thus, the top of this region should be available for heap. This implementation
-	finds this top.
-	*/
-	(void)as;
-	(void)vaddr;
-	(void)sz;
-	(void)readable;
-	(void)writeable;
-	(void)executable;
+    /*
+    This function is implemented assuming that as_define_region is called
+    by load_elf to allocate space for user program code and static variables.
+    Thus, the top of this region should be available for heap. This implementation
+    finds this top.
+    */
+    (void)as;
+    (void)vaddr;
+    (void)sz;
+    (void)readable;
+    (void)writeable;
+    (void)executable;
 
-	vaddr_t region_end = vaddr + sz;
-	if (region_end > as->heap_base) {
-		vaddr_t page_aligned_end = VPAGE_ADDR_MASK & region_end;
-		page_aligned_end += PAGE_SIZE;
+    vaddr_t region_end = vaddr + sz;
+    if (region_end > as->heap_base) {
+        vaddr_t page_aligned_end = VPAGE_ADDR_MASK & region_end;
+        page_aligned_end += PAGE_SIZE;
 
-		as->heap_base = page_aligned_end;
-		as->brk = as->heap_base;
-	}
+        as->heap_base = page_aligned_end;
+        as->brk = as->heap_base;
+    }
 
-	return 0;
+    return 0;
 }
 
 int
 as_prepare_load(struct addrspace *as)
 {
-	/* Nothing */
+    /* Nothing */
 
-	(void)as;
-	return 0;
+    (void)as;
+    return 0;
 }
 
 int
 as_complete_load(struct addrspace *as)
 {
-	/* Nothing */
+    /* Nothing */
 
-	(void)as;
-	return 0;
+    (void)as;
+    return 0;
 }
 
 int
 as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 {
-	(void)as;
+    (void)as;
 
-	/* Initial user-level stack pointer */
-	*stackptr = USERSTACK;
+    /* Initial user-level stack pointer */
+    *stackptr = USERSTACK;
 
-	return 0;
+    return 0;
 }

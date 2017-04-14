@@ -111,7 +111,7 @@ allocate_sbrk(struct l2_pt *l2_pt, v_page_l1_t old_l1, v_page_l2_t old_l2, v_pag
 }
 
 /*
-XXX: There is some memory leak going on with sbrk
+Sbrk system call. Moves the sbrk pointer in address space and manipulates memory for the user's heap.
 */
 int
 sys_sbrk(ssize_t amount, int32_t *retval0)

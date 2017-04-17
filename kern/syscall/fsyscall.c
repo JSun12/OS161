@@ -21,10 +21,10 @@ sys_open(const char *filename, int flags, int32_t *output)
 {
     struct vnode *new;
     int result;
-	char *path;
+    char *path;
     size_t *path_len;
     int err;
-	struct ft *ft = curproc->proc_ft;
+    struct ft *ft = curproc->proc_ft;
 
     path = kmalloc(PATH_MAX);
     path_len = kmalloc(sizeof(int));
@@ -39,42 +39,40 @@ sys_open(const char *filename, int flags, int32_t *output)
     }
 
     /* Open the address and discard the kernel space address */
-	result = vfs_open(path, flags, 0, &new);
+    result = vfs_open(path, flags, 0, &new);
 
     kfree(path);
     kfree(path_len);
 
-	if (result) {
-		return result;
+    if (result) {
+        return result;
     }
 
     struct ft_entry *entry = entry_create(new);
-	if (entry == NULL) {
-		return ENOMEM;
-	}
+    if (entry == NULL) {
+        return ENOMEM;
+    }
 
-	if (flags & O_APPEND) {
+    if (flags & O_APPEND) {
         struct stat *stat;
-		off_t eof;
+        off_t eof;
 
-		stat = kmalloc(sizeof(struct stat));
+        stat = kmalloc(sizeof(struct stat));
         if(stat == NULL){
             return ENOMEM;
         }
 
-		//TODO: this doesn't work for concurrency
-
-		VOP_STAT(entry->file, stat);
-		eof = stat->st_size;
-		entry->offset = eof;
+        VOP_STAT(entry->file, stat);
+        eof = stat->st_size;
+        entry->offset = eof;
         kfree(stat);
-	}
+    }
 
-	entry->rwflags = flags;
+    entry->rwflags = flags;
 
-	lock_acquire(ft->ft_lock);
-	result = add_entry(ft, entry, output);
-	lock_release(ft->ft_lock);
+    lock_acquire(ft->ft_lock);
+    result = add_entry(ft, entry, output);
+    lock_release(ft->ft_lock);
 
     if (result){
         return result;
@@ -89,18 +87,18 @@ Closes the file at fd. Returns EBADF if fd is not used.
 int
 sys_close(int fd)
 {
-	struct ft *ft = curproc->proc_ft;
+    struct ft *ft = curproc->proc_ft;
 
-	lock_acquire(ft->ft_lock);
-	if(!fd_valid_and_used(ft,fd)) {
-		lock_release(ft->ft_lock);
-		return EBADF;
-	}
+    lock_acquire(ft->ft_lock);
+    if(!fd_valid_and_used(ft,fd)) {
+        lock_release(ft->ft_lock);
+        return EBADF;
+    }
 
-	free_fd(ft, fd);
+    free_fd(ft, fd);
 
-	lock_release(ft->ft_lock);
-	return 0;
+    lock_release(ft->ft_lock);
+    return 0;
 }
 
 /*
@@ -110,52 +108,52 @@ current seek position. The file must be open for writing.
 int
 sys_write(int fd, const void *buf, size_t nbytes, int32_t *retval0)
 {
-	struct ft *ft = curproc->proc_ft;
-	struct iovec iov;
-	struct uio u;
-	int result;
-	struct ft_entry *entry;
+    struct ft *ft = curproc->proc_ft;
+    struct iovec iov;
+    struct uio u;
+    int result;
+    struct ft_entry *entry;
 
-	lock_acquire(ft->ft_lock);
-	if (!fd_valid_and_used(ft, fd)) {
-		lock_release(ft->ft_lock);
-		return EBADF;
-	}
+    lock_acquire(ft->ft_lock);
+    if (!fd_valid_and_used(ft, fd)) {
+        lock_release(ft->ft_lock);
+        return EBADF;
+    }
 
-	entry = ft->entries[fd];
-	lock_acquire(entry->entry_lock);
+    entry = ft->entries[fd];
+    lock_acquire(entry->entry_lock);
 
-	lock_release(ft->ft_lock);
+    lock_release(ft->ft_lock);
 
 
-	if (!(entry->rwflags & (O_WRONLY | O_RDWR))) {
-		lock_release(entry->entry_lock);
-		return EBADF;
-	}
+    if (!(entry->rwflags & (O_WRONLY | O_RDWR))) {
+        lock_release(entry->entry_lock);
+        return EBADF;
+    }
 
-	iov.iov_ubase = (userptr_t)buf;
-	iov.iov_len = nbytes;
-	u.uio_iov = &iov;
-	u.uio_iovcnt = 1;
-	u.uio_resid = nbytes;
-	u.uio_offset = entry->offset;
-	u.uio_segflg = UIO_USERSPACE;
-	u.uio_rw = UIO_WRITE;
-	u.uio_space = curproc->p_addrspace;
+    iov.iov_ubase = (userptr_t)buf;
+    iov.iov_len = nbytes;
+    u.uio_iov = &iov;
+    u.uio_iovcnt = 1;
+    u.uio_resid = nbytes;
+    u.uio_offset = entry->offset;
+    u.uio_segflg = UIO_USERSPACE;
+    u.uio_rw = UIO_WRITE;
+    u.uio_space = curproc->p_addrspace;
 
-	result = VOP_WRITE(entry->file, &u);
-	if (result) {
-		lock_release(entry->entry_lock);
-		return result;
-	}
+    result = VOP_WRITE(entry->file, &u);
+    if (result) {
+        lock_release(entry->entry_lock);
+        return result;
+    }
 
-	ssize_t len = nbytes - u.uio_resid;
-	entry->offset += (off_t) len;
+    ssize_t len = nbytes - u.uio_resid;
+    entry->offset += (off_t) len;
 
-	lock_release(entry->entry_lock);
+    lock_release(entry->entry_lock);
     *retval0 = len;
 
-	return 0;
+    return 0;
 }
 
 /*
@@ -165,49 +163,49 @@ at current seek position. The file must be open for reading.
 int
 sys_read(int fd, void *buf, size_t buflen, ssize_t *retval0)
 {
-	struct ft *ft = curproc->proc_ft;
-	struct iovec iov;
-	struct uio u;
-	int result;
+    struct ft *ft = curproc->proc_ft;
+    struct iovec iov;
+    struct uio u;
+    int result;
     struct ft_entry *entry;
 
-	lock_acquire(ft->ft_lock);
-	if (!fd_valid_and_used(ft, fd)) {
-		lock_release(ft->ft_lock);
-		return EBADF;
-	}
+    lock_acquire(ft->ft_lock);
+    if (!fd_valid_and_used(ft, fd)) {
+        lock_release(ft->ft_lock);
+        return EBADF;
+    }
 
-	entry = ft->entries[fd];
-	lock_acquire(entry->entry_lock);
+    entry = ft->entries[fd];
+    lock_acquire(entry->entry_lock);
 
-	lock_release(ft->ft_lock);
+    lock_release(ft->ft_lock);
 
 
-	if (entry->rwflags & O_WRONLY) {
-		lock_release(entry->entry_lock);
-		return EBADF;
-	}
+    if (entry->rwflags & O_WRONLY) {
+        lock_release(entry->entry_lock);
+        return EBADF;
+    }
 
-	iov.iov_ubase = (userptr_t)buf;
-	iov.iov_len = buflen;
-	u.uio_iov = &iov;
-	u.uio_iovcnt = 1;
-	u.uio_resid = buflen;
-	u.uio_offset = entry->offset;
-	u.uio_segflg = UIO_USERSPACE;
-	u.uio_rw = UIO_READ;
-	u.uio_space = curproc->p_addrspace;
+    iov.iov_ubase = (userptr_t)buf;
+    iov.iov_len = buflen;
+    u.uio_iov = &iov;
+    u.uio_iovcnt = 1;
+    u.uio_resid = buflen;
+    u.uio_offset = entry->offset;
+    u.uio_segflg = UIO_USERSPACE;
+    u.uio_rw = UIO_READ;
+    u.uio_space = curproc->p_addrspace;
 
-	result = VOP_READ(entry->file, &u);
-	if (result) {
-		lock_release(entry->entry_lock);
-		return result;
-	}
+    result = VOP_READ(entry->file, &u);
+    if (result) {
+        lock_release(entry->entry_lock);
+        return result;
+    }
 
-	ssize_t len = buflen - u.uio_resid;
-	entry->offset += (off_t) len;
+    ssize_t len = buflen - u.uio_resid;
+    entry->offset += (off_t) len;
 
-	lock_release(entry->entry_lock);
+    lock_release(entry->entry_lock);
     *retval0 = len;
 
     return 0;
@@ -220,62 +218,62 @@ int
 sys_lseek(int fd, off_t pos, int whence, int32_t *retval0, int32_t *retval1)
 {
 
-	if (whence < 0 || whence > 2) {
-		return EINVAL;
-	}
+    if (whence < 0 || whence > 2) {
+        return EINVAL;
+    }
 
-	struct ft *ft = curproc->proc_ft;
-	struct ft_entry *entry;
-	struct stat *stat;
-	off_t eof;
-	off_t seek;
+    struct ft *ft = curproc->proc_ft;
+    struct ft_entry *entry;
+    struct stat *stat;
+    off_t eof;
+    off_t seek;
 
-	lock_acquire(ft->ft_lock);
-	if (!fd_valid_and_used(ft, fd)) {
-		lock_release(ft->ft_lock);
-		return EBADF;
-	}
+    lock_acquire(ft->ft_lock);
+    if (!fd_valid_and_used(ft, fd)) {
+        lock_release(ft->ft_lock);
+        return EBADF;
+    }
 
-	entry = ft->entries[fd];
-	lock_acquire(entry->entry_lock);
+    entry = ft->entries[fd];
+    lock_acquire(entry->entry_lock);
 
-	lock_release(ft->ft_lock);
+    lock_release(ft->ft_lock);
 
-	if (!VOP_ISSEEKABLE(entry->file)) {
-		lock_release(entry->entry_lock);
-		return ESPIPE;
-	}
+    if (!VOP_ISSEEKABLE(entry->file)) {
+        lock_release(entry->entry_lock);
+        return ESPIPE;
+    }
 
-	stat = kmalloc(sizeof(struct stat));
-	VOP_STAT(entry->file, stat);
-	eof = stat->st_size;
+    stat = kmalloc(sizeof(struct stat));
+    VOP_STAT(entry->file, stat);
+    eof = stat->st_size;
 
-	seek = entry->offset;
+    seek = entry->offset;
 
-	switch (whence) {
-		case SEEK_SET:
-		seek = pos;
-		break;
-		case SEEK_CUR:
-		seek += pos;
-		break;
-		case SEEK_END:
-		seek = eof + pos;
-		break;
-	}
+    switch (whence) {
+        case SEEK_SET:
+        seek = pos;
+        break;
+        case SEEK_CUR:
+        seek += pos;
+        break;
+        case SEEK_END:
+        seek = eof + pos;
+        break;
+    }
 
-	if (seek < 0) {
-		lock_release(entry->entry_lock);
-		return EINVAL;
-	}
+    if (seek < 0) {
+        lock_release(entry->entry_lock);
+        return EINVAL;
+    }
 
-	entry->offset = seek;
+    entry->offset = seek;
 
-	lock_release(entry->entry_lock);
-	*retval0 = seek >> 32;
-	*retval1 = seek & 0xFFFFFFFF;
+    lock_release(entry->entry_lock);
+    *retval0 = seek >> 32;
+    *retval1 = seek & 0xFFFFFFFF;
 
-	return 0;
+    return 0;
 }
 
 /*
@@ -286,30 +284,30 @@ int
 sys_dup2(int oldfd, int newfd, int *output)
 {
     if (newfd < 0 || oldfd < 0 || newfd >= OPEN_MAX || oldfd >= OPEN_MAX) {
-		return EBADF;
-	}
+        return EBADF;
+    }
 
     struct ft *ft = curproc->proc_ft;
-	struct ft_entry *entry;
+    struct ft_entry *entry;
 
-	lock_acquire(ft->ft_lock);
+    lock_acquire(ft->ft_lock);
 
-	if (!fd_valid_and_used(ft, oldfd)) {
-		lock_release(ft->ft_lock);
-		return EBADF;
-	}
+    if (!fd_valid_and_used(ft, oldfd)) {
+        lock_release(ft->ft_lock);
+        return EBADF;
+    }
 
-	entry = ft->entries[oldfd];
+    entry = ft->entries[oldfd];
 
-	if (fd_valid_and_used(ft, newfd)){
-		free_fd(ft, newfd);
-	}
+    if (fd_valid_and_used(ft, newfd)){
+        free_fd(ft, newfd);
+    }
 
-	assign_fd(ft, entry, newfd);
-	lock_release(ft->ft_lock);
+    assign_fd(ft, entry, newfd);
+    lock_release(ft->ft_lock);
     *output = newfd;
 
-	return 0;
+    return 0;
 }
 
 /*
@@ -334,16 +332,16 @@ sys_chdir(const char *pathname)
         return err;
     }
 
-	int result = vfs_chdir((char *) pathname);
+    int result = vfs_chdir((char *) pathname);
 
     kfree(path);
     kfree(path_len);
 
-	if (result) {
-		return result;
-	}
+    if (result) {
+        return result;
+    }
 
-	return 0;
+    return 0;
 }
 
 /*
@@ -352,25 +350,25 @@ Stores the current working directory at buf.
 int
 sys___getcwd(char *buf, size_t buflen, int32_t *output)
 {
-	struct iovec iov;
-	struct uio u;
-	int result;
+    struct iovec iov;
+    struct uio u;
+    int result;
 
-	iov.iov_ubase = (userptr_t)buf;
-	iov.iov_len = buflen;
-	u.uio_iov = &iov;
-	u.uio_iovcnt = 1;
-	u.uio_resid = buflen;
-	u.uio_offset = 0;
-	u.uio_segflg = UIO_USERSPACE;
-	u.uio_rw = UIO_READ;
-	u.uio_space = curproc->p_addrspace;
+    iov.iov_ubase = (userptr_t)buf;
+    iov.iov_len = buflen;
+    u.uio_iov = &iov;
+    u.uio_iovcnt = 1;
+    u.uio_resid = buflen;
+    u.uio_offset = 0;
+    u.uio_segflg = UIO_USERSPACE;
+    u.uio_rw = UIO_READ;
+    u.uio_space = curproc->p_addrspace;
 
-	result = vfs_getcwd(&u);
-	if (result) {
-		return result;
-	}
+    result = vfs_getcwd(&u);
+    if (result) {
+        return result;
+    }
 
-	*output = buflen - u.uio_resid;
-	return 0;
+    *output = buflen - u.uio_resid;
+    return 0;
 }

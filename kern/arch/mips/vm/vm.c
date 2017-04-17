@@ -151,7 +151,6 @@ cm_decref(p_page_t p_page)
     SET_REF(cm->cm_entries[p_page], curref);
 }
 
-// TODO: too many magic numbers?
 void
 set_pid8(p_page_t p_page, pid_t pid, uint32_t pos)
 {
@@ -504,7 +503,6 @@ swap_uio_cleanup(struct uio *u)
     kfree(u);
 }
 
-// TODO: Use the return value for error checking in rest of code
 /*
 Updates the location of a page in the page tables of other processes.
 */

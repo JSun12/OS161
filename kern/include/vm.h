@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2000, 2001, 2002, 2003, 2004, 2005, 2008, 2009
- *	The President and Fellows of Harvard College.
+ *    The President and Fellows of Harvard College.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,51 +30,6 @@
 #ifndef _VM_H_
 #define _VM_H_
 
-/*
-TODO: make sure users can't access kernel addresses
-make sure to set tlb dirty bit as clear to enforce read only
-
-TODO: are my lines too long?
-
-TODO: deal with the dirty bit in cm entries
-
-TODO: check for memory leaks
-
-TODO: in AS define region, we may wish to make regions executable or read only, but
-they may not be allocated in physical memory, thus they are not valid. Thus, we
-should be able to encode meaning into page table entries that are not valid.
-
-
-TODO: Get the stack of a user process based on as_define_region (if possible; I'm
-not sure what as_define_region is supposed to do).
-
-
-TODO: organize where functions are defined
-
-
-TODO: forktest almost works, but with 512k, we run out of memory. We may need swap to pass (ask TA)
-Also, we have to check for valid fault address (current, commented out check breaks forktest). We
-must do this to sbrktest (where unallocated heap virtual addresses are passed; we must kill
-the process when this happens).
-
-
-TODO: we need to implement tlb shootdown in order to use the vm on multiple
-processors.
-
-TODO: In execv, we switch address spaces before destroying the old one. Thus, when pids8 in a cm entry
-points to a process which switched it's address space but haven't destroyed the old, we run into problems
-(such as with update_pt_entries)
-
-CHANGES MADE TO PROCESS SYSCALLS: clear_pid must be called only after proc_destroy.
-
-KASSERT the properties that as_destroy needs of the process (pid, and all) in order to do it's job properly.
-
-Proper pidtable logic. Note that proc.c proc_destroy was temporarilty modified. Also, execv the address space is
-destroyed before switching. ALso, pid table implementations destory the proc before clearing the pid.
-TODO: acquire locks in update_pt_entries. namely pid lock and proc lock.
-*/
-
-
 #include <machine/vm.h>
 
 /* Fault-type arguments to vm_fault() */
@@ -89,7 +44,7 @@ TODO: acquire locks in update_pt_entries. namely pid lock and proc lock.
 #define KMALLOC_END          0x40000000    /* Bit indicating the last page of a kmalloc; used for kfree */
 #define DIRTY                0x20000000    /* Bit indicating if the page was modified since it was created/swapped in from disk */
 #define REF_BIT              0x10000000    /* Bit used in swapping clock, indicating if ppage was in tlb */
-#define REF_COUNT            0x03f00000    // TODO: maybe we need the pid number
+#define REF_COUNT            0x03f00000
 #define GET_REF(entry)       (((entry) & REF_COUNT) >> 20)
 #define SET_REF(entry, ref)  ((entry) = ((entry) & (~REF_COUNT)) | (((ref) & 0x0000003f) << 20))
 #define VP_MASK              0x000fffff    /* Mask to extract the virtual page of the page frame */

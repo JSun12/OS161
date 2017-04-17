@@ -32,7 +32,6 @@ p_page_t last_page_swap; /* One page past the last free physical page SWAP */
 
 static struct vnode *swap_disk;
 static const char swap_dir[] = "lhd0raw:";
-
 static volatile p_page_t swapclock;
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -56,7 +55,6 @@ in_all_memory(p_page_t p_page)
     bool in_all_memory = (first_alloc_page <= p_page && p_page < last_page_swap);
     return in_all_memory;
 }
-
 
 static
 void
@@ -268,7 +266,6 @@ swap_bootstrap()
     first_page_swap = last_page;
     last_page_swap = 0x400;
 
-    // remove this when we know the truth
     KASSERT(kproc != NULL);
 
     if (SWAP_ON)
@@ -306,8 +303,6 @@ alloc_kpages(size_t npages)
 
     return PADDR_TO_KVADDR(PAGE_TO_ADDR(start));
 }
-
-
 
 void
 free_kpages(vaddr_t addr)
@@ -643,7 +638,6 @@ swap_out()
     return NOSWAPPABLE;
 }
 
-// add any error codes
 int
 swap_in(p_page_t p_page, p_page_t old_p_page)
 {
@@ -702,7 +696,6 @@ enough_free()
     return last_page - cm_counter >= MIN_FREE_PAGES;
 }
 
-// daemon yield after a write, right?
 void
 paging_daemon(void *data1, unsigned long data2)
 {
@@ -949,7 +942,6 @@ release_ppage(p_page_t p_page, pid_t pid)
     spinlock_release(&cm_spinlock);
 }
 
-
 int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
@@ -1124,7 +1116,7 @@ free_l1_pt(struct l2_pt *l2_pt, v_page_l2_t v_l2)
         p_page_t p_page = l2_pt->l2_entries[v_l2] & PAGE_MASK;
         release_ppage(p_page, curproc->pid);
 
-        l2_pt->l2_entries[v_l2] = 0; // maybe make this more explicit
+        l2_pt->l2_entries[v_l2] = 0;
     }
 }
 

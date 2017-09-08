@@ -10,15 +10,44 @@ The [course](https://courses.students.ubc.ca/cs/main?pname=subjarea&tname=subjar
 Operating systems, their design and their implementation. Process concurrency, synchronization, communication and scheduling. Device drivers, memory management, virtual memory, file systems, networking and security.
 
 ## Implemented Features
-### Mutex Lock
+### Concurrency
+#### Mutex Lock
 A mutex lock is an struct that may be acquired only by one thread at a time. It operates using a waiting channel and a spinlock. When a thread wants to use the mutex lock, the implementation will acquire a spinlock (and spin on it if it not available), check the status of the lock flag, and sleep on the waiting channel / release the spinlock if the flag is not free.
 
-The implementation of OS161's mutex lock can be found in /kern/thread/synch.c
+The implementation of mutex locks can be found in /kern/thread/synch.c
 
-### Condition Variable
+#### Condition Variable
 A condition variable is a struct that threads may be placed on to sleep until some function calls upon it to wake a single thread, or all threads. Condition variables allow for synchronization as the act of going to sleep/waking up is an atomic action. They are often used for pausing until a condition is satisfied that allows for concurrent operations to occur safely.
 
-The implementation of OS161's condition variable can be found in /kern/thread/synch.c
+The implementation of condition variables can be found in /kern/thread/synch.c
+
+### Filesystem System Calls
+#### open()
+The implementation of open() can be found in /kern/syscall/fsyscall.c
+#### read()
+The implementation of read() can be found in /kern/syscall/fsyscall.c
+#### write()
+The implementation of write() can be found in /kern/syscall/fsyscall.c
+#### lseek()
+The implementation of lseek() can be found in /kern/syscall/fsyscall.c
+#### close()
+The implementation of close() can be found in /kern/syscall/fsyscall.c
+#### dup2()
+The implementation of dup2() can be found in /kern/syscall/fsyscall.c
+#### chdir()
+The implementation of chdir() can be found in /kern/syscall/fsyscall.c
+#### __getcwd()
+The implementation of __getcwd() can be found in /kern/syscall/fsyscall.c
+
+### Process System Calls
+#### System Call: getpid()
+The implementation of getpid() can be found in /kern/syscall/psyscall.c
+#### System Call: fork()
+The implementation of fork() can be found in /kern/syscall/psyscall.c
+#### System Call: execv()
+The implementation of execv() can be found in /kern/syscall/psyscall.c
+#### System Call: _exit()
+The implementation of _exit() can be found in /kern/syscall/psyscall.c
 
 ## Configuration
 ### Installation

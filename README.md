@@ -48,6 +48,13 @@ The implementation of fork() can be found in /kern/syscall/psyscall.c
 The implementation of execv() can be found in /kern/syscall/psyscall.c
 #### System Call: _exit()
 The implementation of _exit() can be found in /kern/syscall/psyscall.c
+#### System Call: kill_curthread()
+The implementation of kill_curthread() can be found in [TODO: fill in]
+#### System Call: sbrk()
+The implementation of sbrk() can be found in [TODO: fill in]
+
+### Virtual Memory
+OS161 has implemented virtual memory. TODO: Talk about TLB, page tables, MMU, swap.
 
 ## Configuration
 ### Installation
